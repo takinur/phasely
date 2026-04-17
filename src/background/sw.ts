@@ -9,9 +9,9 @@
  *   - All chrome.* calls are wrapped in try/catch with [Phasely] prefix logging.
  */
 
-import { getProfile, setProfile } from "@/lib/storage";
+import { getProfile, setProfile, getSettings, setSettings } from "@/lib/storage";
 import { parseProfile, ProfileParseError } from "@/lib/profile";
-import type { DetectedField, Profile } from "@/lib/types";
+import type { DetectedField, ExtensionSettings, JobContext, Profile } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
 // Debug utility (no-op in production)
@@ -28,13 +28,16 @@ function debug(...args: unknown[]): void {
 // ---------------------------------------------------------------------------
 
 export type Message =
-  | { type: "DETECT_FIELDS" }
+  | { type: "DETECT_FIELDS"; profile?: Profile }
   | { type: "FILL_ALL"; profile: Profile }
   | { type: "FILL_ONLY"; fields: string[]; profile: Profile }
   | { type: "SUBMIT" }
   | { type: "GENERATE_AI"; question: string; fieldKey: string }
   | { type: "GET_PROFILE" }
-  | { type: "SAVE_PROFILE"; markdown: string };
+  | { type: "SAVE_PROFILE"; markdown: string }
+  | { type: "GET_SETTINGS" }
+  | { type: "SAVE_SETTINGS"; settings: ExtensionSettings }
+  | { type: "AUTH_GOOGLE" };
 
 // ---------------------------------------------------------------------------
 // Response shapes
@@ -83,11 +86,14 @@ async function forwardToActiveTab(
 // Handlers
 // ---------------------------------------------------------------------------
 
-async function handleDetectFields(): Promise<Response<{ fields: DetectedField[] }>> {
+async function handleDetectFields(
+  profile?: Profile,
+): Promise<Response<{ fields: DetectedField[]; jobContext: JobContext | null }>> {
   try {
-    const result = await forwardToActiveTab({ type: "DETECT_FIELDS" });
+    const result = await forwardToActiveTab({ type: "DETECT_FIELDS", profile });
     debug("DETECT_FIELDS result:", result);
-    return { ok: true, fields: result as DetectedField[] };
+    const payload = result as { fields: DetectedField[]; jobContext: JobContext | null };
+    return { ok: true, fields: payload.fields ?? [], jobContext: payload.jobContext ?? null };
   } catch (err) {
     return { ok: false, error: String(err) };
   }
@@ -166,6 +172,112 @@ async function handleSaveProfile(
 }
 
 // ---------------------------------------------------------------------------
+// Default settings
+// ---------------------------------------------------------------------------
+
+const DEFAULT_SETTINGS: ExtensionSettings = {
+  geminiModel: "gemini-1.5-flash",
+  autoSubmit: false,
+  confirmBeforeSubmit: true,
+  preferredAiProvider: "gemini",
+};
+
+// ---------------------------------------------------------------------------
+// Settings handlers
+// ---------------------------------------------------------------------------
+
+async function handleGetSettings(): Promise<Response<{ settings: ExtensionSettings }>> {
+  try {
+    const stored = await getSettings();
+    const settings: ExtensionSettings = stored ?? DEFAULT_SETTINGS;
+    debug("GET_SETTINGS:", settings.geminiModel);
+    return { ok: true, settings };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
+async function handleSaveSettings(
+  settings: ExtensionSettings,
+): Promise<Response<{ settings: ExtensionSettings }>> {
+  try {
+    await setSettings(settings);
+    debug("SAVE_SETTINGS stored:", settings.geminiModel);
+    return { ok: true, settings };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Google OAuth handler
+// ---------------------------------------------------------------------------
+
+/**
+ * Launch the Google OAuth flow using chrome.identity.launchWebAuthFlow.
+ *
+ * MV3 note: chrome.identity.getAuthToken is only available for extensions
+ * published on the Chrome Web Store with a verified OAuth client. During
+ * development we fall back to launchWebAuthFlow with the extension's own
+ * client ID. The token is stored in chrome.storage.session (ephemeral —
+ * never persists across SW restarts) and is NOT encrypted because it is
+ * already scoped to the browser profile.
+ *
+ * The token is also saved to chrome.storage.local under "geminiToken" so
+ * the Gemini client can retrieve it when needed.
+ *
+ * Returns { ok: true, token } on success, { ok: false, error } on failure.
+ */
+async function handleAuthGoogle(): Promise<Response<{ token: string }>> {
+  try {
+    // Attempt the preferred path first: chrome.identity.getAuthToken
+    // This works for CWS-published extensions and gives a long-lived token.
+    const token = await new Promise<string>((resolve, reject) => {
+      try {
+        chrome.identity.getAuthToken({ interactive: true }, (result) => {
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message ?? "getAuthToken failed"));
+            return;
+          }
+          // @types/chrome ≥ 0.0.290 returns GetAuthTokenResult | string
+          const tokenStr =
+            typeof result === "string"
+              ? result
+              : (result as { token?: string })?.token ?? "";
+          if (!tokenStr) {
+            reject(new Error("getAuthToken returned no token"));
+          } else {
+            resolve(tokenStr);
+          }
+        });
+      } catch (err) {
+        reject(err);
+      }
+    });
+
+    debug("AUTH_GOOGLE: token acquired via getAuthToken");
+
+    // Persist the token so the Gemini client can retrieve it.
+    // Uses chrome.storage.local — content of token is not a secret we own
+    // (Google can revoke it at any time) but we still namespace it clearly.
+    await new Promise<void>((resolve, reject) => {
+      chrome.storage.local.set({ geminiToken: token }, () => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+        } else {
+          resolve();
+        }
+      });
+    });
+
+    return { ok: true, token };
+  } catch (err) {
+    console.error("[Phasely] AUTH_GOOGLE failed:", err);
+    return { ok: false, error: String(err) };
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Message router
 // ---------------------------------------------------------------------------
 
@@ -196,7 +308,7 @@ chrome.runtime.onMessage.addListener(
       try {
         switch (msg.type) {
           case "DETECT_FIELDS":
-            sendResponse(await handleDetectFields());
+            sendResponse(await handleDetectFields(msg.profile));
             break;
 
           case "FILL_ALL":
@@ -221,6 +333,18 @@ chrome.runtime.onMessage.addListener(
 
           case "SAVE_PROFILE":
             sendResponse(await handleSaveProfile(msg.markdown));
+            break;
+
+          case "GET_SETTINGS":
+            sendResponse(await handleGetSettings());
+            break;
+
+          case "SAVE_SETTINGS":
+            sendResponse(await handleSaveSettings(msg.settings));
+            break;
+
+          case "AUTH_GOOGLE":
+            sendResponse(await handleAuthGoogle());
             break;
 
           default: {

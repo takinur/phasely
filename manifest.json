@@ -3,7 +3,7 @@
     "name": "Phasely",
     "version": "0.1.0",
     "description": "Auto-fill job applications from your profile in one click.",
-    "permissions": ["activeTab", "scripting", "storage"],
+    "permissions": ["activeTab", "scripting", "storage", "identity"],
     "action": {
         "default_popup": "src/popup.html",
         "default_title": "Phasely"
@@ -18,6 +18,10 @@
             "run_at": "document_idle"
         }
     ],
+    "options_ui": {
+        "page": "src/options.html",
+        "open_in_tab": true
+    },
     "icons": {
         "16": "src/assets/icon-16.png",
         "48": "src/assets/icon-48.png",
