@@ -2,6 +2,62 @@ import matter from "gray-matter";
 import type { Education, Profile } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
+// Prompt-injection defence
+// ---------------------------------------------------------------------------
+
+/**
+ * Phrases that are strong signals of prompt-injection attempts embedded in
+ * user-supplied profile text. Each pattern is written without the `g` flag so
+ * it can be safely reused across multiple `.test()` calls.
+ */
+const INJECTION_PATTERNS: RegExp[] = [
+  /ignore\s+(all\s+)?(previous|prior|above|the\s+above|earlier)\s*(instructions?|rules?|prompts?|directives?|context)/i,
+  /disregard\s+(all\s+)?(previous|prior|above|earlier)\s*(instructions?|rules?|prompts?|directives?)/i,
+  /forget\s+(all\s+)?(previous|prior|above)\s*(instructions?|rules?|context|prompts?)/i,
+  /you\s+are\s+now\s+(a\s+|an\s+|the\s+)?\w/i,
+  /act\s+as\s+(if\s+(you\s+are\s+)?|a\s+|an\s+)/i,
+  /pretend\s+(you\s+are|to\s+be)\s+/i,
+  /your\s+new\s+(instructions?|task|role|purpose|goal|objective)/i,
+  /override\s+(previous|prior|all)?\s*(instructions?|rules?|constraints?)/i,
+  /new\s+instructions?\s*:/i,
+  /\[?\s*(system|assistant|human)\s*\]?\s*:/i,
+];
+
+/**
+ * Scan raw markdown for prompt-injection patterns.
+ * Returns an array of matched snippets (empty when clean).
+ * Exported so the Options page can show a live warning before saving.
+ */
+export function detectInjection(raw: string): string[] {
+  const flagged: string[] = [];
+  for (const pattern of INJECTION_PATTERNS) {
+    const match = raw.match(new RegExp(pattern.source, "gi"));
+    if (match) {
+      for (const m of match) {
+        if (!flagged.includes(m)) flagged.push(m);
+      }
+    }
+  }
+  return flagged;
+}
+
+/**
+ * Sanitize raw markdown before it is stored and sent to Gemini.
+ * Lines that contain injection patterns are replaced with a neutral placeholder
+ * so the rest of the profile remains intact.
+ */
+export function sanitizeRawMarkdown(raw: string): string {
+  return raw
+    .split("\n")
+    .map((line) =>
+      INJECTION_PATTERNS.some((p) => p.test(line))
+        ? "[line removed by Phasely security filter]"
+        : line,
+    )
+    .join("\n");
+}
+
+// ---------------------------------------------------------------------------
 // ProfileParseError
 // ---------------------------------------------------------------------------
 
@@ -92,7 +148,7 @@ export function validateProfile(data: unknown, rawMarkdown = ""): Profile {
     skills: getStringArray(data, "skills"),
     education: getEducationArray(data, "education"),
 
-    rawMarkdown,
+    rawMarkdown: sanitizeRawMarkdown(rawMarkdown),
   };
 }
 

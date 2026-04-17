@@ -11,9 +11,9 @@
  * GET_SETTINGS, SAVE_SETTINGS). No direct storage calls from this page.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ExtensionSettings, Profile, StoredResume } from "@/lib/types";
-import { profileToMarkdown } from "@/lib/profile";
+import { profileToMarkdown, detectInjection } from "@/lib/profile";
 import { DEFAULT_SETTINGS } from "@/lib/defaults";
 
 // ---------------------------------------------------------------------------
@@ -131,6 +131,7 @@ function ProfileSection({
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const injectionHits = useMemo(() => detectInjection(markdown), [markdown]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleSave = useCallback(async () => {
@@ -267,8 +268,27 @@ function ProfileSection({
           }}
           placeholder={`---\nfirstName: Jane\nlastName: Doe\nemail: jane@example.com\nphone: +1 555 000 0000\nlocation: New York, NY\ncurrentTitle: Software Engineer\ncurrentCompany: Acme Corp\nyearsExperience: 5\nworkAuth: US Citizen\nnoticePeriod: 2 weeks\nsalaryExpectation: $120,000\nwillingToRelocate: false\nremotePreference: Remote\nskills:\n  - TypeScript\n  - React\n---`}
           rows={12}
-          className="w-full rounded-md border border-gray-300 px-3 py-2 text-xs font-mono text-gray-700 placeholder:text-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-y"
+          className={[
+            "w-full rounded-md border px-3 py-2 text-xs font-mono text-gray-700 placeholder:text-gray-300 focus:outline-none focus:ring-2 focus:border-transparent resize-y",
+            injectionHits.length > 0
+              ? "border-amber-400 focus:ring-amber-400"
+              : "border-gray-300 focus:ring-indigo-500",
+          ].join(" ")}
         />
+
+        {injectionHits.length > 0 && (
+          <Alert type="warning">
+            <span className="font-semibold">Suspicious content detected.</span> The following phrases look like AI prompt instructions and will be automatically stripped before saving:{" "}
+            <span className="font-mono">{injectionHits.map((h) => `"${h}"`).join(", ")}</span>
+          </Alert>
+        )}
+
+        <p className="text-xs text-gray-400 flex items-center gap-1">
+          <svg className="w-3 h-3 shrink-0" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+            <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
+          </svg>
+          Phasely strips any AI instructions from your profile before saving and before sending to Gemini.
+        </p>
 
         {saveError && <Alert type="error">{saveError}</Alert>}
         {saveSuccess && (
@@ -770,6 +790,35 @@ export function Options() {
         {loadError && (
           <Alert type="error">Failed to load stored data: {loadError}</Alert>
         )}
+
+        {/* Introduction */}
+        <div className="rounded-xl border border-indigo-100 bg-gradient-to-br from-indigo-50 to-white px-6 py-5">
+          <h2 className="text-sm font-semibold text-indigo-900 mb-1.5">One profile. Every application.</h2>
+          <p className="text-sm text-gray-600 leading-relaxed">
+            Phasely reads your <code className="text-xs bg-indigo-100 text-indigo-700 px-1 py-0.5 rounded">profile.md</code> once,
+            then autofills any job application form in a single click — Workday, Greenhouse, Lever, iCIMS, and more.
+            Your data is encrypted on your device and never sent to any Phasely server.
+            AI-written fields (cover letters, open questions) call Gemini directly from your browser using your Google account.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-3 text-xs text-gray-500">
+            <span className="flex items-center gap-1">
+              <svg className="w-3.5 h-3.5 text-green-500" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
+              AES-256 encrypted storage
+            </span>
+            <span className="flex items-center gap-1">
+              <svg className="w-3.5 h-3.5 text-green-500" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
+              Zero telemetry
+            </span>
+            <span className="flex items-center gap-1">
+              <svg className="w-3.5 h-3.5 text-green-500" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
+              No Phasely servers
+            </span>
+            <span className="flex items-center gap-1">
+              <svg className="w-3.5 h-3.5 text-green-500" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
+              Prompt injection protection
+            </span>
+          </div>
+        </div>
 
         <ProfileSection
           profile={profile}
