@@ -121,6 +121,52 @@ function Toggle({
 // Profile section
 // ---------------------------------------------------------------------------
 
+const PROFILE_TEMPLATE = `---
+firstName: Alex
+lastName: Chen
+email: alex.chen@example.com
+phone: +1 415 555 0192
+location: San Francisco, CA
+currentTitle: Senior Software Engineer
+currentCompany: Acme Corp
+yearsExperience: 7
+workAuth: US Citizen
+noticePeriod: 2 weeks
+salaryExpectation: $160,000
+willingToRelocate: false
+remotePreference: Remote
+linkedin: https://linkedin.com/in/alexchen
+github: https://github.com/alexchen
+portfolio: https://alexchen.dev
+skills:
+  - TypeScript
+  - React
+  - Node.js
+  - PostgreSQL
+  - AWS
+  - Docker
+education:
+  - degree: BSc Computer Science
+    institution: UC Berkeley
+    year: 2017
+referencesAvailable: true
+---
+
+## Summary
+
+Results-driven software engineer with 7 years of experience building scalable web applications and APIs. Track record of reducing latency, cutting infrastructure costs, and mentoring junior engineers.
+
+## Experience
+
+**Senior Software Engineer — Acme Corp** (2021–present)
+- Led migration from monolith to microservices, reducing p99 latency by 40%
+- Mentored 3 junior engineers and introduced PR standards adopted team-wide
+
+**Software Engineer — StartupXYZ** (2018–2021)
+- Built real-time collaboration features serving 50k daily active users
+- Cut cloud spend by $120k/year through query and caching optimisations
+`;
+
 function ProfileSection({
   profile,
   onProfileSaved,
@@ -128,7 +174,7 @@ function ProfileSection({
   profile: Profile | null;
   onProfileSaved: (p: Profile) => void;
 }) {
-  const [markdown, setMarkdown] = useState("");
+  const [markdown, setMarkdown] = useState(PROFILE_TEMPLATE);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -147,7 +193,7 @@ function ProfileSection({
       if (!res.ok) throw new Error(res.error ?? "Save failed");
       onProfileSaved(res.profile);
       setSaveSuccess(true);
-      setMarkdown("");
+      setMarkdown(PROFILE_TEMPLATE);
     } catch (err) {
       setSaveError(String(err));
     } finally {
@@ -171,7 +217,7 @@ function ProfileSection({
     <section className="rounded-lg border border-gray-200 p-6">
       <SectionHeader
         title="Profile"
-        subtitle="Paste your profile markdown below. Phasely uses it to autofill every application field."
+        subtitle="Edit the template with your details and click Save. Phasely uses it to autofill every application field."
       />
 
       {/* Current profile summary */}
@@ -224,11 +270,11 @@ function ProfileSection({
 
       {/* AI generation hint */}
       <div className="mb-4 rounded-md bg-indigo-50 border border-indigo-100 px-4 py-3 text-xs text-indigo-800">
-        <span className="font-semibold">Tip:</span> Ask ChatGPT or Gemini{" "}
+        <span className="font-semibold">Tip:</span> Upload your CV or resume to ChatGPT or Gemini and ask:{" "}
         <span className="italic">
-          "Generate a Phasely job-application profile in YAML front-matter markdown for a [your role] with [X] years of experience. Include all fields from the template below."
+          "Convert this into a Phasely profile using the YAML front-matter markdown format shown below, keeping all the same field names."
         </span>{" "}
-        — then paste the result here and edit your details.
+        Then paste the result into the editor and click Save.
       </div>
 
       {/* Paste area */}
@@ -240,7 +286,7 @@ function ProfileSection({
             setSaveSuccess(false);
             setSaveError(null);
           }}
-          placeholder={`---\nfirstName: Alex\nlastName: Chen\nemail: alex.chen@example.com\nphone: +1 415 555 0192\nlocation: San Francisco, CA\ncurrentTitle: Senior Software Engineer\ncurrentCompany: Acme Corp\nyearsExperience: 7\nworkAuth: US Citizen\nnoticePeriod: 2 weeks\nsalaryExpectation: $160,000\nwillingToRelocate: false\nremotePreference: Remote\nlinkedin: https://linkedin.com/in/alexchen\ngithub: https://github.com/alexchen\nportfolio: https://alexchen.dev\nskills:\n  - TypeScript\n  - React\n  - Node.js\n  - PostgreSQL\n  - AWS\n  - Docker\neducation:\n  - degree: BSc Computer Science\n    institution: UC Berkeley\n    year: 2017\nreferencesAvailable: true\n---\n\n## Summary\n\nResults-driven software engineer with 7 years of experience building scalable web applications and APIs. Track record of reducing latency, cutting infrastructure costs, and mentoring junior engineers.\n\n## Experience\n\n**Senior Software Engineer — Acme Corp** (2021–present)\n- Led migration from monolith to microservices, reducing p99 latency by 40%\n- Mentored 3 junior engineers and introduced PR standards adopted team-wide\n\n**Software Engineer — StartupXYZ** (2018–2021)\n- Built real-time collaboration features serving 50k daily active users\n- Cut cloud spend by $120k/year through query and caching optimisations`}
+          spellCheck={false}
           rows={18}
           className={[
             "w-full rounded-md border px-3 py-2 text-xs font-mono text-gray-700 placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:border-transparent resize-y",

@@ -1,5 +1,27 @@
-import matter from "gray-matter";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import type { Education, Profile } from "@/lib/types";
+
+// ---------------------------------------------------------------------------
+// Minimal front-matter parser (replaces gray-matter, no Node.js deps)
+// ---------------------------------------------------------------------------
+
+/**
+ * Split a markdown string into its YAML front-matter data object and the
+ * remaining body text. Handles both LF and CRLF line endings.
+ *
+ * Returns `{ data: {}, content: markdown }` when no front-matter is found.
+ */
+function extractFrontMatter(markdown: string): { data: unknown; content: string } {
+  const match = markdown.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
+  if (!match) return { data: {}, content: markdown };
+  try {
+    const data = parseYaml(match[1]) as unknown;
+    const content = markdown.slice(match[0].length);
+    return { data, content };
+  } catch {
+    return { data: {}, content: markdown };
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Prompt-injection defence
@@ -85,9 +107,8 @@ export class ProfileParseError extends Error {
  * Throws ProfileParseError if required fields are absent or have the wrong type.
  */
 export function parseProfile(markdown: string): Profile {
-  const parsed = matter(markdown);
-  const data: unknown = isRecord(parsed.data) ? parsed.data : {};
-  return validateProfile(data, markdown);
+  const { data } = extractFrontMatter(markdown);
+  return validateProfile(isRecord(data) ? data : {}, markdown);
 }
 
 /**
@@ -182,7 +203,7 @@ export function profileToMarkdown(profile: Profile): string {
   if (profile.github !== undefined) frontMatter.github = profile.github;
   if (profile.portfolio !== undefined) frontMatter.portfolio = profile.portfolio;
 
-  return matter.stringify("", frontMatter);
+  return `---\n${stringifyYaml(frontMatter)}---\n`;
 }
 
 // ---------------------------------------------------------------------------
