@@ -992,7 +992,7 @@ export function Options() {
         <DangerZone onWiped={handleWiped} />
 
         <p className="text-xs text-gray-400 text-center pb-4">
-          Phasely v1.0.2 — All data is encrypted locally. Zero telemetry.
+          Phasely v1.0.2 — All data is encrypted locally. Zero telemetry. copyright © {new Date().getFullYear()} Phasely
         </p>
       </main>
     </div>
