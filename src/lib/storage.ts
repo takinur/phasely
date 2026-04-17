@@ -7,7 +7,7 @@
  *   - No raw encryption key material is ever persisted to storage.
  */
 
-import type { ExtensionSettings, Profile } from "@/lib/types";
+import type { ExtensionSettings, Profile, StoredData } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
 // Chrome storage promise wrappers
@@ -271,6 +271,44 @@ export async function getSettings(
     return parsed;
   } catch (err) {
     console.error("[Phasely] getSettings failed:", err);
+    throw err;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Generic typed get / set — keyed on StoredData
+// ---------------------------------------------------------------------------
+
+/**
+ * Retrieve and decrypt any top-level StoredData key.
+ * Returns null when the key has never been written.
+ */
+export async function get<T extends StoredData[keyof StoredData]>(
+  key: keyof StoredData,
+): Promise<T | null> {
+  try {
+    const stored = await storageGet<{ iv: string; data: string }>(key);
+    if (stored === null) return null;
+    const json = await decryptData(stored.iv, stored.data);
+    return parseJsonSafe(json) as T | null;
+  } catch (err) {
+    console.error(`[Phasely] get("${key}") failed:`, err);
+    throw err;
+  }
+}
+
+/**
+ * Encrypt and persist any top-level StoredData key.
+ */
+export async function set<T extends StoredData[keyof StoredData]>(
+  key: keyof StoredData,
+  value: T,
+): Promise<void> {
+  try {
+    const encrypted = await encryptData(JSON.stringify(value));
+    await storageSet(key, encrypted);
+  } catch (err) {
+    console.error(`[Phasely] set("${key}") failed:`, err);
     throw err;
   }
 }
