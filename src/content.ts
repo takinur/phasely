@@ -26,7 +26,7 @@ chrome.runtime.onMessage.addListener(
     message: unknown,
     _sender: chrome.runtime.MessageSender,
     sendResponse: (response: unknown) => void,
-  ): true => {
+  ): boolean => {
     if (
       typeof message !== "object" ||
       message === null ||
@@ -38,6 +38,10 @@ chrome.runtime.onMessage.addListener(
     }
 
     const msg = message as { type: string } & Record<string, unknown>
+    const contentMessageTypes = new Set(["DETECT_FIELDS", "FILL_ALL", "FILL_ONLY", "SUBMIT"])
+    if (!contentMessageTypes.has(msg.type)) {
+      return false
+    }
 
     ;(async () => {
       try {
@@ -98,7 +102,7 @@ chrome.runtime.onMessage.addListener(
           }
 
           default:
-            sendResponse({ ok: false, error: `Unknown message type: ${msg.type}` })
+            return
         }
       } catch (err) {
         console.error("[Phasely] content onMessage error:", err)

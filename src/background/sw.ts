@@ -9,7 +9,7 @@
  *   - All chrome.* calls are wrapped in try/catch with [Phasely] prefix logging.
  */
 
-import { getProfile, setProfile, getResume, setResume, getSettings, setSettings, setGeminiToken } from "@/lib/storage";
+import { getProfile, setProfile, getResume, setResume, getSettings, setSettings, setGeminiToken, getGeminiToken } from "@/lib/storage";
 import { DEFAULT_SETTINGS } from "@/lib/defaults";
 import type { StoredResume } from "@/lib/types";
 import { parseProfile, ProfileParseError } from "@/lib/profile";
@@ -41,7 +41,8 @@ export type Message =
   | { type: "SAVE_RESUME"; base64: string; filename: string; mimeType: string }
   | { type: "GET_SETTINGS" }
   | { type: "SAVE_SETTINGS"; settings: ExtensionSettings }
-  | { type: "AUTH_GOOGLE" };
+  | { type: "AUTH_GOOGLE" }
+  | { type: "GET_GEMINI_MODELS" };
 
 // ---------------------------------------------------------------------------
 // Response shapes
@@ -199,6 +200,43 @@ async function handleSaveSettings(
     await setSettings(settings);
     debug("SAVE_SETTINGS stored:", settings.geminiModel);
     return { ok: true, settings };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
+async function handleGetGeminiModels(): Promise<Response<{ oauthEnabled: boolean; models: string[] }>> {
+  try {
+    const token = await getGeminiToken();
+    if (!token) {
+      return { ok: true, oauthEnabled: false, models: [] };
+    }
+
+    const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200", {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    if (!response.ok) {
+      if (response.status === 401 || response.status === 403) {
+        return { ok: true, oauthEnabled: false, models: [] };
+      }
+      const body = await response.text();
+      throw new Error(`Failed to fetch Gemini models (${response.status}): ${body}`);
+    }
+
+    const payload = (await response.json()) as {
+      models?: Array<{ name?: string; supportedGenerationMethods?: string[] }>;
+    };
+    const available = (payload.models ?? [])
+      .filter((model) => (model.supportedGenerationMethods ?? []).includes("generateContent"))
+      .map((model) => (model.name ?? "").replace(/^models\//, ""))
+      .filter((name) => name.startsWith("gemini-"));
+
+    const models = Array.from(new Set(available));
+    return { ok: true, oauthEnabled: true, models };
   } catch (err) {
     return { ok: false, error: String(err) };
   }
@@ -376,6 +414,10 @@ chrome.runtime.onMessage.addListener(
 
           case "AUTH_GOOGLE":
             sendResponse(await handleAuthGoogle());
+            break;
+
+          case "GET_GEMINI_MODELS":
+            sendResponse(await handleGetGeminiModels());
             break;
 
           default: {

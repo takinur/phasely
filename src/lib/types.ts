@@ -48,7 +48,7 @@ export interface JobContext {
 }
 
 export interface ExtensionSettings {
-  geminiModel: "gemini-1.5-flash" | "gemini-1.5-pro"
+  geminiModel: string
   autoSubmit: boolean
   confirmBeforeSubmit: boolean
   claudeApiKey?: string       // dormant in v1, active in next feature

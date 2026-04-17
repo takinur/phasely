@@ -513,9 +513,7 @@ function isStoredResume(value: unknown): value is StoredResume {
 function isExtensionSettings(value: unknown): value is ExtensionSettings {
   if (!isRecord(value)) return false;
 
-  const isGeminiModel =
-    value.geminiModel === "gemini-1.5-flash" ||
-    value.geminiModel === "gemini-1.5-pro";
+  const isGeminiModel = typeof value.geminiModel === "string" && value.geminiModel.length > 0;
   const isProvider =
     value.preferredAiProvider === "gemini" || value.preferredAiProvider === "claude";
 

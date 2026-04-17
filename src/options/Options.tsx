@@ -4,7 +4,7 @@
  * Sections:
  *   1. Profile import — paste/upload profile.md, see parse preview, save
  *   2. Profile summary — display stored profile fields, export .md
- *   3. Extension settings — Gemini model, auto-submit toggle, confirm dialog
+ *   3. Extension settings — Gemini model, submit confirm dialog
  *   4. Danger zone — wipe all data
  *
  * All persistence goes through the service worker (SAVE_PROFILE, GET_PROFILE,
@@ -28,7 +28,8 @@ type MsgPayload =
   | { type: "SAVE_RESUME"; base64: string; filename: string; mimeType: string }
   | { type: "GET_SETTINGS" }
   | { type: "SAVE_SETTINGS"; settings: ExtensionSettings }
-  | { type: "AUTH_GOOGLE" };
+  | { type: "AUTH_GOOGLE" }
+  | { type: "GET_GEMINI_MODELS" };
 
 function sendMsg<T = unknown>(payload: MsgPayload): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -461,14 +462,55 @@ function ResumeSection({
 function SettingsSection({
   settings,
   onSettingsSaved,
+  modelsRefreshKey,
 }: {
   settings: ExtensionSettings;
   onSettingsSaved: (s: ExtensionSettings) => void;
+  modelsRefreshKey: number;
 }) {
   const [draft, setDraft] = useState<ExtensionSettings>(settings);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [modelsLoading, setModelsLoading] = useState(true);
+  const [oauthEnabled, setOauthEnabled] = useState(false);
+  const [modelsError, setModelsError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setModelsLoading(true);
+    setModelsError(null);
+
+    (async () => {
+      try {
+        const res = await sendMsg<{
+          ok: boolean;
+          oauthEnabled: boolean;
+          models: string[];
+          error?: string;
+        }>({ type: "GET_GEMINI_MODELS" });
+        if (!res.ok) throw new Error(res.error ?? "Failed to load Gemini models");
+        if (cancelled) return;
+
+        const models = res.models ?? [];
+        setOauthEnabled(res.oauthEnabled);
+        setAvailableModels(models);
+
+        if (res.oauthEnabled && models.length > 0 && !models.includes(draft.geminiModel)) {
+          setDraft((prev) => ({ ...prev, geminiModel: models[0] }));
+        }
+      } catch (err) {
+        if (!cancelled) setModelsError(String(err));
+      } finally {
+        if (!cancelled) setModelsLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [draft.geminiModel, modelsRefreshKey]);
 
   const handleSave = useCallback(async () => {
     setSaving(true);
@@ -515,12 +557,27 @@ function SettingsSection({
             onChange={(e) =>
               update("geminiModel", e.target.value as ExtensionSettings["geminiModel"])
             }
+            disabled={!oauthEnabled || modelsLoading}
             className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
           >
-            <option value="gemini-1.5-flash">Gemini 1.5 Flash (faster, cheaper)</option>
-            <option value="gemini-1.5-pro">Gemini 1.5 Pro (smarter, slower)</option>
+            {availableModels.length > 0 ? (
+              availableModels.map((model) => (
+                <option key={model} value={model}>
+                  {model}
+                </option>
+              ))
+            ) : (
+              <option value={draft.geminiModel}>{draft.geminiModel}</option>
+            )}
           </select>
-          <p className="text-xs text-gray-400 mt-1">Used for AI-written fields (cover letter, open questions).</p>
+          <p className="text-xs text-gray-400 mt-1">
+            {!oauthEnabled
+              ? "Enable AI feature first."
+              : modelsLoading
+                ? "Loading available Gemini models…"
+                : "Used for AI-written fields (cover letter, open questions)."}
+          </p>
+          {modelsError && <Alert type="error">{modelsError}</Alert>}
         </div>
 
         {/* Confirm before submit */}
@@ -555,7 +612,7 @@ function SettingsSection({
 // Google Auth section
 // ---------------------------------------------------------------------------
 
-function AuthSection() {
+function AuthSection({ onAuthed }: { onAuthed: () => void }) {
   const [authing, setAuthing] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [authSuccess, setAuthSuccess] = useState(false);
@@ -570,12 +627,13 @@ function AuthSection() {
       });
       if (!res.ok) throw new Error(res.error ?? "Auth failed");
       setAuthSuccess(true);
+      onAuthed();
     } catch (err) {
       setAuthError(String(err));
     } finally {
       setAuthing(false);
     }
-  }, []);
+  }, [onAuthed]);
 
   return (
     <section className="rounded-lg border border-gray-200 p-6">
@@ -747,7 +805,7 @@ function DangerZone({ onWiped }: { onWiped: () => void }) {
         </div>
 
         <p className="text-xs text-gray-400">
-          Cleaning browser data cleans up everything.
+          GDPR: Cleaning browser data cleans up everything and there’s no way to recover it, so make sure to export your profile if you want to keep using Phasely after the wipe.
         </p>
       </div>
     </section>
@@ -763,6 +821,7 @@ export function Options() {
   const [resumeFilename, setResumeFilename] = useState<string | null>(null);
   const [settings, setSettings] = useState<ExtensionSettings>(DEFAULT_SETTINGS);
   const [settingsResetKey, setSettingsResetKey] = useState(0);
+  const [modelsRefreshKey, setModelsRefreshKey] = useState(0);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -796,6 +855,11 @@ export function Options() {
     setResumeFilename(null);
     setSettings(DEFAULT_SETTINGS);
     setSettingsResetKey((k) => k + 1);
+    setModelsRefreshKey((k) => k + 1);
+  }, []);
+
+  const handleAuthed = useCallback(() => {
+    setModelsRefreshKey((k) => k + 1);
   }, []);
 
   if (loading) {
@@ -880,9 +944,10 @@ export function Options() {
           key={settingsResetKey}
           settings={settings}
           onSettingsSaved={setSettings}
+          modelsRefreshKey={modelsRefreshKey}
         />
 
-        <AuthSection />
+        <AuthSection onAuthed={handleAuthed} />
 
         <DangerZone onWiped={handleWiped} />
 
