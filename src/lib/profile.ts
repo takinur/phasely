@@ -105,13 +105,23 @@ export class ProfileParseError extends Error {
  */
 export function parseProfile(markdown: string): Profile {
   try {
+    if (!markdown.trim()) {
+      throw new ProfileParseError(["Profile is empty — paste your profile.md content"]);
+    }
+    // Check for the opening --- fence before attempting to parse, so users get a
+    // clear message instead of "firstName required" when the front-matter is absent.
+    if (!/^---/.test(markdown.trimStart())) {
+      throw new ProfileParseError([
+        "Missing YAML front-matter — profile must start with --- on the first line, followed by your fields (e.g. firstName: Alex)",
+      ]);
+    }
     const { data } = extractFrontMatter(markdown);
     return validateProfile(isRecord(data) ? data : {}, markdown);
   } catch (err) {
     if (err instanceof ProfileParseError) throw err;
     // YAML syntax error — re-throw as a ProfileParseError with a useful message
     // so the Options page can display it instead of "firstName cannot be empty".
-    throw new ProfileParseError([`YAML parse error — ${String(err)}`]);
+    throw new ProfileParseError([`YAML syntax error — ${String(err)}`]);
   }
 }
 
@@ -179,7 +189,8 @@ export function validateProfile(data: unknown, rawMarkdown = ""): Profile {
 
 /**
  * Serialize a Profile back to a .md string with YAML front-matter.
- * Useful for the Options page "Export my data" feature.
+ * Preserves the original markdown body (Summary, Experience, etc.) that was
+ * stored in rawMarkdown so saving doesn't silently erase the user's prose.
  */
 export function profileToMarkdown(profile: Profile): string {
   // Build front-matter data — omit rawMarkdown (it's internal metadata)
@@ -207,7 +218,17 @@ export function profileToMarkdown(profile: Profile): string {
   if (profile.github !== undefined) frontMatter.github = profile.github;
   if (profile.portfolio !== undefined) frontMatter.portfolio = profile.portfolio;
 
-  return `---\n${stringifyYaml(frontMatter)}---\n`;
+  const yamlSection = `---\n${stringifyYaml(frontMatter)}---\n`;
+
+  // Re-attach the markdown body that follows the front-matter close (---).
+  // rawMarkdown holds the full sanitised original markdown, so we strip the
+  // front-matter block and keep everything after it.
+  const bodyMatch = profile.rawMarkdown.match(
+    /^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)([\s\S]*)$/,
+  );
+  const body = (bodyMatch ? bodyMatch[1] : "").trimStart();
+
+  return body ? `${yamlSection}\n${body}` : yamlSection;
 }
 
 // ---------------------------------------------------------------------------

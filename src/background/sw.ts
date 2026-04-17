@@ -9,7 +9,7 @@
  *   - All chrome.* calls are wrapped in try/catch with [Phasely] prefix logging.
  */
 
-import { getProfile, setProfile, getResume, setResume, getSettings, setSettings, setGeminiToken, getGeminiToken } from "@/lib/storage";
+import { getProfile, setProfile, getResume, setResume, getSettings, setSettings, setGeminiToken, getGeminiToken, wipeAll } from "@/lib/storage";
 import { DEFAULT_SETTINGS } from "@/lib/defaults";
 import type { StoredResume } from "@/lib/types";
 import { parseProfile, ProfileParseError } from "@/lib/profile";
@@ -42,7 +42,8 @@ export type Message =
   | { type: "GET_SETTINGS" }
   | { type: "SAVE_SETTINGS"; settings: ExtensionSettings }
   | { type: "AUTH_GOOGLE" }
-  | { type: "GET_GEMINI_MODELS" };
+  | { type: "GET_GEMINI_MODELS" }
+  | { type: "WIPE_DATA" };
 
 // ---------------------------------------------------------------------------
 // Response shapes
@@ -72,7 +73,9 @@ async function getActiveTabId(): Promise<number> {
 
 /**
  * Forward a message to the active tab's content script and await its response.
- * Typed via the Message union so callers never pass arbitrary objects.
+ * Returns null (instead of throwing) when the tab is not a web page (e.g.
+ * chrome://, about:, chrome-extension://) or when the content script has not
+ * yet loaded — callers treat null as "no content script available".
  */
 async function forwardToActiveTab(
   message: Message,
@@ -82,6 +85,17 @@ async function forwardToActiveTab(
     debug("Forwarding to tab", tabId, message.type);
     return await chrome.tabs.sendMessage(tabId, message);
   } catch (err) {
+    const msg = String(err);
+    // These errors mean the content script isn't reachable on this tab —
+    // not a real error for the user; callers handle null gracefully.
+    if (
+      msg.includes("Could not establish connection") ||
+      msg.includes("Receiving end does not exist") ||
+      msg.includes("No tab with id")
+    ) {
+      debug("forwardToActiveTab: content script not reachable on tab", tabId, "—", msg);
+      return null;
+    }
     console.error("[Phasely] forwardToActiveTab failed:", err);
     throw err;
   }
@@ -96,6 +110,8 @@ async function handleDetectFields(
 ): Promise<Response<{ fields: DetectedField[]; jobContext: JobContext | null }>> {
   try {
     const result = await forwardToActiveTab({ type: "DETECT_FIELDS", profile });
+    // null means the content script isn't available on this tab (non-web page)
+    if (result === null) return { ok: true, fields: [], jobContext: null };
     debug("DETECT_FIELDS result:", result);
     const payload = result as { fields: DetectedField[]; jobContext: JobContext | null };
     return { ok: true, fields: payload.fields ?? [], jobContext: payload.jobContext ?? null };
@@ -111,7 +127,8 @@ async function handleFillAll(
     // Fetch the resume here in the SW so the content script never needs to
     // make a nested round-trip back to the SW while handling FILL_ALL.
     const resume = await getResume().catch(() => null);
-    await forwardToActiveTab({ type: "FILL_ALL", profile, resume });
+    const result = await forwardToActiveTab({ type: "FILL_ALL", profile, resume });
+    if (result === null) return { ok: false, error: "No fillable page is open in the active tab." };
     return { ok: true };
   } catch (err) {
     return { ok: false, error: String(err) };
@@ -123,7 +140,18 @@ async function handleFillOnly(
   profile: Profile,
 ): Promise<Response<Record<never, never>>> {
   try {
-    await forwardToActiveTab({ type: "FILL_ONLY", fields, profile });
+    const result = await forwardToActiveTab({ type: "FILL_ONLY", fields, profile });
+    if (result === null) return { ok: false, error: "No fillable page is open in the active tab." };
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
+async function handleWipeData(): Promise<Response<Record<never, never>>> {
+  try {
+    await wipeAll();
+    debug("WIPE_DATA: all storage cleared");
     return { ok: true };
   } catch (err) {
     return { ok: false, error: String(err) };
@@ -484,6 +512,10 @@ chrome.runtime.onMessage.addListener(
 
           case "GET_GEMINI_MODELS":
             sendResponse(await handleGetGeminiModels());
+            break;
+
+          case "WIPE_DATA":
+            sendResponse(await handleWipeData());
             break;
 
           default: {

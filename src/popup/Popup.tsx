@@ -411,8 +411,8 @@ export function Popup() {
               High confidence ({highFields.length})
             </h2>
             <ul className="rounded-md border border-gray-200 px-3 bg-gray-50">
-              {highFields.map((f) => (
-                <FieldRow key={f.profileKey} field={f} onFillOne={handleFillOne} />
+              {highFields.map((f, i) => (
+                <FieldRow key={`high-${i}`} field={f} onFillOne={handleFillOne} />
               ))}
             </ul>
           </section>
@@ -425,8 +425,8 @@ export function Popup() {
               Needs review ({lowFields.length})
             </h2>
             <ul className="rounded-md border border-amber-200 px-3 bg-amber-50">
-              {lowFields.map((f) => (
-                <FieldRow key={f.profileKey} field={f} onFillOne={handleFillOne} />
+              {lowFields.map((f, i) => (
+                <FieldRow key={`low-${i}`} field={f} onFillOne={handleFillOne} />
               ))}
             </ul>
           </section>

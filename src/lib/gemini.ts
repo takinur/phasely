@@ -42,7 +42,7 @@ export class GeminiAuthError extends Error {
 // Default model
 // ---------------------------------------------------------------------------
 
-const DEFAULT_MODEL = "gemini-3";
+const DEFAULT_MODEL = "gemini-1.5-flash";
 
 // ---------------------------------------------------------------------------
 // GeminiClient
@@ -52,8 +52,13 @@ export class GeminiClient {
   private readonly model: GenerativeModel;
 
   constructor(authToken: string) {
-    // The @google/generative-ai SDK accepts an API key. For OAuth, we pass the
-    // token in Authorization header via a custom fetch wrapper injected below.
+    // TODO (activation): GoogleGenerativeAI passes its first arg as ?key= query param.
+    // OAuth bearer tokens must go in "Authorization: Bearer <token>" instead.
+    // Fix before wiring: wrap fetch in requestOptions to inject the header, e.g.:
+    //   const sdk = new GoogleGenerativeAI("ignored", {
+    //     fetchOptions: { headers: { Authorization: `Bearer ${authToken}` } },
+    //   });
+    // Until then the constructor signature is correct; only the header path needs updating.
     const sdk = new GoogleGenerativeAI(authToken);
     this.model = sdk.getGenerativeModel({ model: DEFAULT_MODEL });
   }

@@ -13,7 +13,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ExtensionSettings, Profile, StoredResume } from "@/lib/types";
-import { profileToMarkdown, detectInjection } from "@/lib/profile";
+import { profileToMarkdown, detectInjection, parseProfile, ProfileParseError } from "@/lib/profile";
 import { DEFAULT_SETTINGS } from "@/lib/defaults";
 import logoIcon from "@/assets/phasely-icon.svg";
 
@@ -29,7 +29,8 @@ type MsgPayload =
   | { type: "GET_SETTINGS" }
   | { type: "SAVE_SETTINGS"; settings: ExtensionSettings }
   | { type: "AUTH_GOOGLE" }
-  | { type: "GET_GEMINI_MODELS" };
+  | { type: "GET_GEMINI_MODELS" }
+  | { type: "WIPE_DATA" };
 
 function sendMsg<T = unknown>(payload: MsgPayload): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -317,6 +318,9 @@ function ProfileSection({
           </Alert>
         )}
 
+        {/* Live YAML validator — shows green preview or red error list as user types */}
+        <ProfileValidator markdown={markdown} />
+
         <p className="text-xs text-gray-400 flex items-center gap-1">
           <svg className="w-3 h-3 shrink-0" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
             <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
@@ -353,6 +357,81 @@ function ProfileField({ label, value }: { label: string; value: string }) {
       <dt className="text-gray-400">{label}</dt>
       <dd className="text-gray-700 truncate">{value}</dd>
     </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Live YAML validator — shown below the textarea as the user types
+// ---------------------------------------------------------------------------
+
+/**
+ * Parses the textarea content in real time (debounced 400 ms) and shows either
+ * a green "looks good" summary or a red list of specific errors — so users fix
+ * problems before clicking Save, not after.
+ */
+function ProfileValidator({ markdown }: { markdown: string }) {
+  type ValidationState =
+    | { status: "idle" }
+    | { status: "valid"; firstName: string; lastName: string; email: string; skillsCount: number; educationCount: number }
+    | { status: "invalid"; errors: string[] };
+
+  const [state, setState] = useState<ValidationState>({ status: "idle" });
+
+  useEffect(() => {
+    if (!markdown.trim()) {
+      setState({ status: "idle" });
+      return;
+    }
+    const timer = setTimeout(() => {
+      try {
+        const profile = parseProfile(markdown);
+        setState({
+          status: "valid",
+          firstName: profile.firstName,
+          lastName: profile.lastName,
+          email: profile.email,
+          skillsCount: profile.skills.length,
+          educationCount: profile.education.length,
+        });
+      } catch (err) {
+        const errors =
+          err instanceof ProfileParseError
+            ? err.fields
+            : [String(err)];
+        setState({ status: "invalid", errors });
+      }
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [markdown]);
+
+  if (state.status === "idle") return null;
+
+  if (state.status === "valid") {
+    return (
+      <div className="rounded-md bg-green-50 border border-green-200 px-3 py-2 text-xs text-green-800 flex items-center gap-2">
+        <svg className="w-3.5 h-3.5 shrink-0 text-green-600" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+          <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+        </svg>
+        <span>
+          <span className="font-semibold">{state.firstName} {state.lastName}</span>
+          {" · "}{state.email}
+          {state.skillsCount > 0 && <span className="text-green-600"> · {state.skillsCount} skill{state.skillsCount !== 1 ? "s" : ""}</span>}
+          {state.educationCount > 0 && <span className="text-green-600"> · {state.educationCount} education entr{state.educationCount !== 1 ? "ies" : "y"}</span>}
+        </span>
+      </div>
+    );
+  }
+
+  // Invalid
+  return (
+    <div className="rounded-md bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-700 space-y-1">
+      <p className="font-semibold">Fix these before saving:</p>
+      <ul className="ml-3 list-disc space-y-0.5">
+        {state.errors.map((e, i) => (
+          <li key={i}>{e}</li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -609,6 +688,14 @@ function SettingsSection({
           {modelsError && <Alert type="error">{modelsError}</Alert>}
         </div>
 
+        {/* Auto-submit after fill */}
+        <Toggle
+          label="Auto-submit after fill"
+          description="Automatically click the submit button after filling all fields. Requires 'Confirm before submitting' to be on for safety."
+          checked={draft.autoSubmit}
+          onChange={(v) => update("autoSubmit", v)}
+        />
+
         {/* Confirm before submit */}
         <Toggle
           label="Confirm before submitting"
@@ -819,15 +906,8 @@ function DangerZone({ onWiped }: { onWiped: () => void }) {
     setWipeError(null);
     setWipeSuccess(false);
     try {
-      await new Promise<void>((resolve, reject) => {
-        chrome.storage.local.clear(() => {
-          if (chrome.runtime.lastError) {
-            reject(new Error(chrome.runtime.lastError.message));
-          } else {
-            resolve();
-          }
-        });
-      });
+      const res = await sendMsg<{ ok: boolean; error?: string }>({ type: "WIPE_DATA" });
+      if (!res.ok) throw new Error(res.error ?? "Wipe failed");
       onWiped();
       setConfirming(false);
       setWipeSuccess(true);
