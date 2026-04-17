@@ -570,7 +570,7 @@ function SettingsSection({
               <option value={draft.geminiModel}>{draft.geminiModel}</option>
             )}
           </select>
-          <p className="text-xs text-gray-400 mt-1">
+          <p className="text-xs text-gray-400 mt-1 disabled:opacity-50 disabled:pointer-events-none ">
             {!oauthEnabled
               ? "Enable AI feature first."
               : modelsLoading
@@ -860,6 +860,13 @@ export function Options() {
   const [settings, setSettings] = useState<ExtensionSettings>(DEFAULT_SETTINGS);
   const [settingsResetKey, setSettingsResetKey] = useState(0);
   const [modelsRefreshKey, setModelsRefreshKey] = useState(0);
+  const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
+    try {
+      return window.localStorage.getItem("phasely-options-theme") === "dark";
+    } catch {
+      return false;
+    }
+  });
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -888,6 +895,14 @@ export function Options() {
     return () => { cancelled = true; };
   }, []);
 
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("phasely-options-theme", isDarkMode ? "dark" : "light");
+    } catch {
+      // Ignore storage write errors in restricted contexts.
+    }
+  }, [isDarkMode]);
+
   const handleWiped = useCallback(() => {
     setProfile(null);
     setResumeFilename(null);
@@ -902,14 +917,20 @@ export function Options() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className={[
+        "min-h-screen flex items-center justify-center",
+        isDarkMode ? "options-dark bg-gray-900" : "bg-gray-50",
+      ].join(" ")}>
         <span className="text-sm text-gray-500">Loading…</span>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 font-sans">
+    <div className={[
+      "min-h-screen font-sans",
+      isDarkMode ? "options-dark bg-gray-900" : "bg-gray-50",
+    ].join(" ")}>
       {/* Page header */}
       <div className="bg-white border-b border-gray-200">
         <div className="max-w-2xl mx-auto px-6 py-4 flex items-center justify-between">
@@ -920,7 +941,13 @@ export function Options() {
               <p className="text-xs text-gray-400">Settings</p>
             </div>
           </div>
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setIsDarkMode((prev) => !prev)}
+              className="rounded-md border border-gray-300 px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+            >
+              {isDarkMode ? "Light mode" : "Dark mode"}
+            </button>
             <span
               className={[
                 "inline-block w-2 h-2 rounded-full",
@@ -941,7 +968,7 @@ export function Options() {
         )}
 
         {/* Introduction */}
-        <div className="rounded-xl border border-indigo-100 bg-gradient-to-br from-indigo-50 to-white px-6 py-5">
+        <div className="rounded-xl border border-indigo-100 bg-gradient-to-br from-indigo-50 to-white px-6 py-5 dark:bg-gray-800">
           <h2 className="text-sm font-semibold text-indigo-900 mb-1.5">One profile. Every application.</h2>
           <p className="text-sm text-gray-600 leading-relaxed">
             Describe yourself once in a simple markdown format, then let Phasely autofill any job application in a single click —

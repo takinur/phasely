@@ -78,6 +78,18 @@ npm run test
 3. Zip the contents of `dist/` (not the folder itself).
 4. Upload ZIP to Chrome Web Store dashboard and submit for review.
 
+## Gemini OAuth Setup
+
+1. In Google Cloud Console:
+   1. Enable **Generative Language API**
+   2. Configure OAuth consent screen (External)
+   3. Add your account as a test user
+   4. Create OAuth client credentials for your extension flow
+2. Update `manifest.json`:
+   - Replace `oauth2.client_id` with your real client ID
+   - Keep scope: `https://www.googleapis.com/auth/generative-language`
+3. Reload extension in `chrome://extensions` and use **Sign in with Google** in Options.
+
 ## Security
 
 - Profile and resume data are encrypted before persistence.

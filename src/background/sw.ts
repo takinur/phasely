@@ -207,36 +207,104 @@ async function handleSaveSettings(
 
 async function handleGetGeminiModels(): Promise<Response<{ oauthEnabled: boolean; models: string[] }>> {
   try {
-    const token = await getGeminiToken();
+    const fetchModels = async (token: string): Promise<{ ok: boolean; models: string[]; authFailed: boolean; error?: string }> => {
+      const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200", {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (!response.ok) {
+        if (response.status === 401 || response.status === 403) {
+          return { ok: false, models: [], authFailed: true };
+        }
+        const body = await response.text();
+        return {
+          ok: false,
+          models: [],
+          authFailed: false,
+          error: `Failed to fetch Gemini models (${response.status}): ${body}`,
+        };
+      }
+
+      const payload = (await response.json()) as {
+        models?: Array<{ name?: string; supportedGenerationMethods?: string[] }>;
+      };
+      const available = (payload.models ?? [])
+        .filter((model) => (model.supportedGenerationMethods ?? []).includes("generateContent"))
+        .map((model) => (model.name ?? "").replace(/^models\//, ""))
+        .filter((name) => name.startsWith("gemini-"));
+
+      return { ok: true, models: Array.from(new Set(available)), authFailed: false };
+    };
+
+    const readAuthToken = async (): Promise<string | null> => {
+      const token = await getGeminiToken();
+      return token && token.trim().length > 0 ? token : null;
+    };
+
+    const acquireAuthToken = async (interactive: boolean): Promise<string | null> => {
+      const token = await new Promise<string | null>((resolve, reject) => {
+        chrome.identity.getAuthToken({ interactive }, (result) => {
+          if (chrome.runtime.lastError) {
+            const message = chrome.runtime.lastError.message ?? "getAuthToken failed";
+            if (!interactive) {
+              resolve(null);
+              return;
+            }
+            reject(new Error(message));
+            return;
+          }
+
+          const tokenStr =
+            typeof result === "string"
+              ? result
+              : (result as { token?: string })?.token ?? "";
+          resolve(tokenStr || null);
+        });
+      });
+      if (token) {
+        await setGeminiToken(token);
+      }
+      return token;
+    };
+
+    const invalidateAuthToken = async (token: string): Promise<void> => {
+      await new Promise<void>((resolve) => {
+        chrome.identity.removeCachedAuthToken({ token }, () => resolve());
+      });
+    };
+
+    let token = await readAuthToken();
     if (!token) {
       return { ok: true, oauthEnabled: false, models: [] };
     }
 
-    const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200", {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
-
-    if (!response.ok) {
-      if (response.status === 401 || response.status === 403) {
-        return { ok: true, oauthEnabled: false, models: [] };
-      }
-      const body = await response.text();
-      throw new Error(`Failed to fetch Gemini models (${response.status}): ${body}`);
+    let result = await fetchModels(token);
+    if (result.ok) {
+      return { ok: true, oauthEnabled: true, models: result.models };
     }
 
-    const payload = (await response.json()) as {
-      models?: Array<{ name?: string; supportedGenerationMethods?: string[] }>;
-    };
-    const available = (payload.models ?? [])
-      .filter((model) => (model.supportedGenerationMethods ?? []).includes("generateContent"))
-      .map((model) => (model.name ?? "").replace(/^models\//, ""))
-      .filter((name) => name.startsWith("gemini-"));
+    if (!result.authFailed) {
+      throw new Error(result.error ?? "Failed to fetch Gemini models");
+    }
 
-    const models = Array.from(new Set(available));
-    return { ok: true, oauthEnabled: true, models };
+    await invalidateAuthToken(token);
+    token = await acquireAuthToken(false);
+    if (!token) {
+      return { ok: true, oauthEnabled: false, models: [] };
+    }
+
+    result = await fetchModels(token);
+    if (result.ok) {
+      return { ok: true, oauthEnabled: true, models: result.models };
+    }
+
+    if (result.authFailed) {
+      return { ok: true, oauthEnabled: false, models: [] };
+    }
+    throw new Error(result.error ?? "Failed to fetch Gemini models");
   } catch (err) {
     return { ok: false, error: String(err) };
   }
@@ -291,8 +359,6 @@ async function handleSaveResume(
  */
 async function handleAuthGoogle(): Promise<Response<{ token: string }>> {
   try {
-    // Attempt the preferred path first: chrome.identity.getAuthToken
-    // This works for CWS-published extensions and gives a long-lived token.
     const token = await new Promise<string>((resolve, reject) => {
       try {
         chrome.identity.getAuthToken({ interactive: true }, (result) => {
