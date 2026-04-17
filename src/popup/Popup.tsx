@@ -16,6 +16,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { DetectedField, ExtensionSettings, JobContext, Profile } from "@/lib/types";
+import logoIcon from "@/assets/phasely-icon.svg";
 
 // ---------------------------------------------------------------------------
 // Chrome message helpers (typed)
@@ -230,6 +231,7 @@ export function Popup() {
       {/* Header */}
       <header className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
         <div className="flex items-center gap-2">
+          <img src={logoIcon} alt="Phasely logo" className="w-5 h-5 rounded" />
           <span className="font-bold text-base tracking-tight text-gray-900">Phasely</span>
           <StatusDot ok={hasProfile} />
         </div>

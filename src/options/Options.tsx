@@ -15,6 +15,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ExtensionSettings, Profile, StoredResume } from "@/lib/types";
 import { profileToMarkdown, detectInjection } from "@/lib/profile";
 import { DEFAULT_SETTINGS } from "@/lib/defaults";
+import logoIcon from "@/assets/phasely-icon.svg";
 
 // ---------------------------------------------------------------------------
 // Chrome message helper
@@ -223,7 +224,7 @@ function ProfileSection({
 
       {/* AI generation hint */}
       <div className="mb-4 rounded-md bg-indigo-50 border border-indigo-100 px-4 py-3 text-xs text-indigo-800">
-        <span className="font-semibold">Tip:</span> Ask ChatGPT or Gemini —{" "}
+        <span className="font-semibold">Tip:</span> Ask ChatGPT or Gemini{" "}
         <span className="italic">
           "Generate a Phasely job-application profile in YAML front-matter markdown for a [your role] with [X] years of experience. Include all fields from the template below."
         </span>{" "}
@@ -242,7 +243,7 @@ function ProfileSection({
           placeholder={`---\nfirstName: Alex\nlastName: Chen\nemail: alex.chen@example.com\nphone: +1 415 555 0192\nlocation: San Francisco, CA\ncurrentTitle: Senior Software Engineer\ncurrentCompany: Acme Corp\nyearsExperience: 7\nworkAuth: US Citizen\nnoticePeriod: 2 weeks\nsalaryExpectation: $160,000\nwillingToRelocate: false\nremotePreference: Remote\nlinkedin: https://linkedin.com/in/alexchen\ngithub: https://github.com/alexchen\nportfolio: https://alexchen.dev\nskills:\n  - TypeScript\n  - React\n  - Node.js\n  - PostgreSQL\n  - AWS\n  - Docker\neducation:\n  - degree: BSc Computer Science\n    institution: UC Berkeley\n    year: 2017\nreferencesAvailable: true\n---\n\n## Summary\n\nResults-driven software engineer with 7 years of experience building scalable web applications and APIs. Track record of reducing latency, cutting infrastructure costs, and mentoring junior engineers.\n\n## Experience\n\n**Senior Software Engineer — Acme Corp** (2021–present)\n- Led migration from monolith to microservices, reducing p99 latency by 40%\n- Mentored 3 junior engineers and introduced PR standards adopted team-wide\n\n**Software Engineer — StartupXYZ** (2018–2021)\n- Built real-time collaboration features serving 50k daily active users\n- Cut cloud spend by $120k/year through query and caching optimisations`}
           rows={18}
           className={[
-            "w-full rounded-md border px-3 py-2 text-xs font-mono text-gray-700 placeholder:text-gray-300 focus:outline-none focus:ring-2 focus:border-transparent resize-y",
+            "w-full rounded-md border px-3 py-2 text-xs font-mono text-gray-700 placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:border-transparent resize-y",
             injectionHits.length > 0
               ? "border-amber-400 focus:ring-amber-400"
               : "border-gray-300 focus:ring-indigo-500",
@@ -740,9 +741,12 @@ export function Options() {
       {/* Page header */}
       <div className="bg-white border-b border-gray-200">
         <div className="max-w-2xl mx-auto px-6 py-4 flex items-center justify-between">
-          <div>
-            <h1 className="text-lg font-bold text-gray-900 tracking-tight">Phasely</h1>
-            <p className="text-xs text-gray-400">Settings</p>
+          <div className="flex items-center gap-3">
+            <img src={logoIcon} alt="Phasely logo" className="w-8 h-8 rounded-lg" />
+            <div>
+              <h1 className="text-lg font-bold text-gray-900 tracking-tight">Phasely</h1>
+              <p className="text-xs text-gray-400">Settings</p>
+            </div>
           </div>
           <div className="flex items-center gap-1.5">
             <span
@@ -813,7 +817,7 @@ export function Options() {
         <DangerZone onWiped={handleWiped} />
 
         <p className="text-xs text-gray-400 text-center pb-4">
-          Phasely v0.1.0 — All data is encrypted locally. Zero telemetry.
+          Phasely v1.0.2 — All data is encrypted locally. Zero telemetry.
         </p>
       </main>
     </div>
