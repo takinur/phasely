@@ -14,13 +14,10 @@ import type { Education, Profile } from "@/lib/types";
 function extractFrontMatter(markdown: string): { data: unknown; content: string } {
   const match = markdown.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
   if (!match) return { data: {}, content: markdown };
-  try {
-    const data = parseYaml(match[1]) as unknown;
-    const content = markdown.slice(match[0].length);
-    return { data, content };
-  } catch {
-    return { data: {}, content: markdown };
-  }
+  // Let YAML errors propagate — callers wrap with try/catch and surface a clear message.
+  const data = parseYaml(match[1]) as unknown;
+  const content = markdown.slice(match[0].length);
+  return { data, content };
 }
 
 // ---------------------------------------------------------------------------
@@ -107,8 +104,15 @@ export class ProfileParseError extends Error {
  * Throws ProfileParseError if required fields are absent or have the wrong type.
  */
 export function parseProfile(markdown: string): Profile {
-  const { data } = extractFrontMatter(markdown);
-  return validateProfile(isRecord(data) ? data : {}, markdown);
+  try {
+    const { data } = extractFrontMatter(markdown);
+    return validateProfile(isRecord(data) ? data : {}, markdown);
+  } catch (err) {
+    if (err instanceof ProfileParseError) throw err;
+    // YAML syntax error — re-throw as a ProfileParseError with a useful message
+    // so the Options page can display it instead of "firstName cannot be empty".
+    throw new ProfileParseError([`YAML parse error — ${String(err)}`]);
+  }
 }
 
 /**

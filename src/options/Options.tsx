@@ -175,11 +175,23 @@ function ProfileSection({
   profile: Profile | null;
   onProfileSaved: (p: Profile) => void;
 }) {
-  const [markdown, setMarkdown] = useState(PROFILE_TEMPLATE);
+  // Initialise to existing profile markdown if available, otherwise show the template.
+  const [markdown, setMarkdown] = useState(() =>
+    profile ? profileToMarkdown(profile) : PROFILE_TEMPLATE
+  );
+  const initialisedRef = useRef(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const injectionHits = useMemo(() => detectInjection(markdown), [markdown]);
+
+  // When a profile loads async after mount, populate the textarea once.
+  useEffect(() => {
+    if (profile && !initialisedRef.current) {
+      initialisedRef.current = true;
+      setMarkdown(profileToMarkdown(profile));
+    }
+  }, [profile]);
 
   const handleSave = useCallback(async () => {
     if (!markdown.trim()) return;
@@ -194,7 +206,8 @@ function ProfileSection({
       if (!res.ok) throw new Error(res.error ?? "Save failed");
       onProfileSaved(res.profile);
       setSaveSuccess(true);
-      setMarkdown(PROFILE_TEMPLATE);
+      // Keep the textarea showing what was just saved (not the generic template).
+      setMarkdown(profileToMarkdown(res.profile));
     } catch (err) {
       setSaveError(String(err));
     } finally {
