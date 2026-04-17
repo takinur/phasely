@@ -42,7 +42,7 @@ export class GeminiAuthError extends Error {
 // Default model
 // ---------------------------------------------------------------------------
 
-const DEFAULT_MODEL = "gemini-1.5-flash";
+const DEFAULT_MODEL = "gemini-3";
 
 // ---------------------------------------------------------------------------
 // GeminiClient

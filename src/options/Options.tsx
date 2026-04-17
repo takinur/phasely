@@ -479,8 +479,6 @@ function SettingsSection({
 
   useEffect(() => {
     let cancelled = false;
-    setModelsLoading(true);
-    setModelsError(null);
 
     (async () => {
       try {
@@ -496,9 +494,11 @@ function SettingsSection({
         const models = res.models ?? [];
         setOauthEnabled(res.oauthEnabled);
         setAvailableModels(models);
+        setModelsError(null);
 
-        if (res.oauthEnabled && models.length > 0 && !models.includes(draft.geminiModel)) {
-          setDraft((prev) => ({ ...prev, geminiModel: models[0] }));
+        const firstModel = models[0];
+        if (res.oauthEnabled && firstModel && !models.includes(draft.geminiModel)) {
+          setDraft((prev) => ({ ...prev, geminiModel: firstModel }));
         }
       } catch (err) {
         if (!cancelled) setModelsError(String(err));
