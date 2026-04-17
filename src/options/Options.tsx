@@ -651,14 +651,28 @@ function DangerZone({ onWiped }: { onWiped: () => void }) {
   const [confirming, setConfirming] = useState(false);
   const [wiping, setWiping] = useState(false);
   const [wipeError, setWipeError] = useState<string | null>(null);
+  const [wipeSuccess, setWipeSuccess] = useState(false);
+  const [cooldownSeconds, setCooldownSeconds] = useState(0);
+
+  useEffect(() => {
+    if (cooldownSeconds <= 0) return;
+    const timer = window.setInterval(() => {
+      setCooldownSeconds((prev) => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [cooldownSeconds]);
 
   const handleWipe = useCallback(async () => {
+    if (cooldownSeconds > 0) return;
     if (!confirming) {
+      setWipeError(null);
+      setWipeSuccess(false);
       setConfirming(true);
       return;
     }
     setWiping(true);
     setWipeError(null);
+    setWipeSuccess(false);
     try {
       await new Promise<void>((resolve, reject) => {
         chrome.storage.local.clear(() => {
@@ -670,11 +684,15 @@ function DangerZone({ onWiped }: { onWiped: () => void }) {
         });
       });
       onWiped();
+      setConfirming(false);
+      setWipeSuccess(true);
+      setCooldownSeconds(20);
     } catch (err) {
       setWipeError(String(err));
+    } finally {
       setWiping(false);
     }
-  }, [confirming, onWiped]);
+  }, [confirming, cooldownSeconds, onWiped]);
 
   return (
     <section className="rounded-lg border border-red-200 p-6">
@@ -685,6 +703,7 @@ function DangerZone({ onWiped }: { onWiped: () => void }) {
 
       <div className="space-y-3">
         {wipeError && <Alert type="error">{wipeError}</Alert>}
+        {wipeSuccess && <Alert type="success">Cleanslate</Alert>}
 
         {confirming && (
           <Alert type="warning">
@@ -696,27 +715,40 @@ function DangerZone({ onWiped }: { onWiped: () => void }) {
         <div className="flex gap-2">
           <button
             onClick={handleWipe}
-            disabled={wiping}
+            disabled={wiping || cooldownSeconds > 0}
             className={[
               "rounded-md px-4 py-2 text-sm font-medium transition-colors",
               confirming
                 ? "bg-red-600 text-white hover:bg-red-700"
                 : "border border-red-300 text-red-600 hover:border-red-400 hover:bg-red-50",
-              wiping ? "opacity-50 cursor-not-allowed" : "",
+              wiping || cooldownSeconds > 0 ? "opacity-50 cursor-not-allowed" : "",
             ].join(" ")}
           >
-            {wiping ? "Wiping…" : confirming ? "Confirm — Wipe Everything" : "Wipe All Data"}
+            {wiping
+              ? "Wiping…"
+              : cooldownSeconds > 0
+                ? `Wipe locked (${cooldownSeconds}s)`
+                : confirming
+                  ? "Confirm — Wipe Everything"
+                  : "Wipe All Data"}
           </button>
 
           {confirming && !wiping && (
             <button
-              onClick={() => setConfirming(false)}
+              onClick={() => {
+                setConfirming(false);
+                setWipeSuccess(false);
+              }}
               className="rounded-md px-4 py-2 text-sm font-medium border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors"
             >
               Cancel
             </button>
           )}
         </div>
+
+        <p className="text-xs text-gray-400">
+          Cleaning browser data cleans up everything.
+        </p>
       </div>
     </section>
   );
