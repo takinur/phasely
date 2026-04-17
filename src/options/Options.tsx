@@ -325,7 +325,7 @@ function ProfileSection({
               : "bg-gray-100 text-gray-400 cursor-not-allowed",
           ].join(" ")}
         >
-          {saving ? "Saving…" : "Save Profile"}
+          {saving ? "Saving…" : profile ? "Update Profile" : "Save Profile"}
         </button>
       </div>
     </section>
@@ -501,7 +501,7 @@ function SettingsSection({
     <section className="rounded-lg border border-gray-200 p-6">
       <SectionHeader
         title="Extension Settings"
-        subtitle="Control autofill behaviour and AI model selection."
+        subtitle="Control submit confirmation and AI model selection."
       />
 
       <div className="space-y-5">
@@ -522,14 +522,6 @@ function SettingsSection({
           </select>
           <p className="text-xs text-gray-400 mt-1">Used for AI-written fields (cover letter, open questions).</p>
         </div>
-
-        {/* Auto-submit toggle */}
-        <Toggle
-          label="Auto-submit"
-          description="Automatically click the submit button after filling all fields."
-          checked={draft.autoSubmit}
-          onChange={(v) => update("autoSubmit", v)}
-        />
 
         {/* Confirm before submit */}
         <Toggle

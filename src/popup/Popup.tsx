@@ -3,11 +3,11 @@
  *
  * Responsibilities:
  *   1. Load stored profile from the service worker (GET_PROFILE)
- *   2. Run DETECT_FIELDS on the active tab when user clicks "Scan"
+ *   2. Run DETECT_FIELDS on the active tab when user clicks "Fill"
  *   3. Display detected fields grouped by confidence (green ≥ 0.7, amber < 0.7)
  *   4. Fill all high-confidence fields via FILL_ALL
  *   5. Fill individual fields via FILL_ONLY
- *   6. Trigger submit via SUBMIT (with optional confirm dialog controlled by settings)
+ *   6. Trigger submit via SUBMIT (with optional confirm dialog)
  *   7. Show job context (title + company) when available
  *
  * All chrome.runtime.sendMessage calls go through the service worker — no
@@ -28,7 +28,7 @@ type MsgPayload =
   | { type: "DETECT_FIELDS"; profile?: Profile }
   | { type: "FILL_ALL"; profile: Profile }
   | { type: "FILL_ONLY"; fields: string[]; profile: Profile }
-  | { type: "SUBMIT" };
+  | { type: "SUBMIT"; settings?: Pick<ExtensionSettings, "confirmBeforeSubmit"> };
 
 function sendMsg<T = unknown>(payload: MsgPayload): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -108,11 +108,27 @@ function StatusDot({ ok }: { ok: boolean }) {
   );
 }
 
+function normaliseValue(value: string): string {
+  return value.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function countFilledFields(detected: DetectedField[]): number {
+  return detected.filter((field) => {
+    if (field.fieldType === "file") {
+      return Boolean(field.currentValue.trim());
+    }
+    const suggested = normaliseValue(field.suggestedValue);
+    if (!suggested) return false;
+    const current = normaliseValue(field.currentValue);
+    return current === suggested;
+  }).length;
+}
+
 // ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
 
-type Phase = "idle" | "scanning" | "filling" | "submitting";
+type Phase = "idle" | "filling" | "submitting";
 
 export function Popup() {
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -122,6 +138,7 @@ export function Popup() {
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState<string | null>(null);
   const [fillDone, setFillDone] = useState(false);
+  const [lastFilledCount, setLastFilledCount] = useState(0);
 
   // Load profile + settings once on mount
   useEffect(() => {
@@ -144,45 +161,87 @@ export function Popup() {
     return () => { cancelled = true; };
   }, []);
 
-  const handleScan = useCallback(async () => {
-    if (!profile) return;
-    setPhase("scanning");
-    setError(null);
-    setFillDone(false);
+  const refreshDetectedState = useCallback(async () => {
+    if (!profile) {
+      setFields(null);
+      setJobContext(null);
+      setFillDone(false);
+      setLastFilledCount(0);
+      return;
+    }
     try {
-      const res = await sendMsg<{
+      const detectRes = await sendMsg<{
         ok: boolean;
         fields: DetectedField[];
         jobContext: JobContext | null;
         error?: string;
       }>({ type: "DETECT_FIELDS", profile });
-      if (!res.ok) throw new Error(res.error ?? "Scan failed");
-      setFields(res.fields ?? []);
-      setJobContext(res.jobContext ?? null);
+      if (!detectRes.ok) throw new Error(detectRes.error ?? "Detection failed");
+
+      const detected = detectRes.fields ?? [];
+      const filledCount = countFilledFields(detected);
+      setFields(detected);
+      setJobContext(detectRes.jobContext ?? null);
+      setFillDone(filledCount > 0);
+      setLastFilledCount(filledCount);
+      setError(null);
     } catch (err) {
       setError(String(err));
+    }
+  }, [profile]);
+
+  useEffect(() => {
+    void refreshDetectedState();
+  }, [refreshDetectedState]);
+
+  const detectAndFill = useCallback(async () => {
+    if (!profile) return;
+    setPhase("filling");
+    setError(null);
+    setFillDone(false);
+    setLastFilledCount(0);
+    try {
+      const detectRes = await sendMsg<{
+        ok: boolean;
+        fields: DetectedField[];
+        jobContext: JobContext | null;
+        error?: string;
+      }>({ type: "DETECT_FIELDS", profile });
+      if (!detectRes.ok) throw new Error(detectRes.error ?? "Fill failed");
+
+      const detected = detectRes.fields ?? [];
+      setFields(detected);
+      setJobContext(detectRes.jobContext ?? null);
+      if (detected.length === 0) {
+        return false;
+      }
+
+      const fillRes = await sendMsg<{ ok: boolean; error?: string }>({
+        type: "FILL_ALL",
+        profile,
+      });
+      if (!fillRes.ok) throw new Error(fillRes.error ?? "Fill failed");
+      const optimistic = detected.map((field) =>
+        field.fieldType === "file"
+          ? field
+          : { ...field, currentValue: field.suggestedValue }
+      );
+      const filledCount = countFilledFields(optimistic);
+      setFillDone(filledCount > 0);
+      setLastFilledCount(filledCount);
+      setFields(optimistic);
+      return true;
+    } catch (err) {
+      setError(String(err));
+      return false;
     } finally {
       setPhase("idle");
     }
   }, [profile]);
 
-  const handleFillAll = useCallback(async () => {
-    if (!profile) return;
-    setPhase("filling");
-    setError(null);
-    try {
-      const res = await sendMsg<{ ok: boolean; error?: string }>({
-        type: "FILL_ALL",
-        profile,
-      });
-      if (!res.ok) throw new Error(res.error ?? "Fill failed");
-      setFillDone(true);
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setPhase("idle");
-    }
-  }, [profile]);
+  const handleFill = useCallback(async () => {
+    await detectAndFill();
+  }, [detectAndFill]);
 
   const handleFillOne = useCallback(
     async (key: string) => {
@@ -202,15 +261,16 @@ export function Popup() {
     [profile],
   );
 
-  const handleSubmit = useCallback(async () => {
-    if (settings?.confirmBeforeSubmit) {
-      const ok = window.confirm("Submit the application now?");
-      if (!ok) return;
-    }
+  const submitApplication = useCallback(async () => {
     setPhase("submitting");
     setError(null);
     try {
-      const res = await sendMsg<{ ok: boolean; error?: string }>({ type: "SUBMIT" });
+      const res = await sendMsg<{ ok: boolean; error?: string }>({
+        type: "SUBMIT",
+        settings: {
+          confirmBeforeSubmit: settings?.confirmBeforeSubmit ?? true,
+        },
+      });
       if (!res.ok) throw new Error(res.error ?? "Submit failed");
     } catch (err) {
       setError(String(err));
@@ -218,6 +278,12 @@ export function Popup() {
       setPhase("idle");
     }
   }, [settings]);
+
+  const handleFillAndSubmit = useCallback(async () => {
+    const filled = await detectAndFill();
+    if (!filled) return;
+    await submitApplication();
+  }, [detectAndFill, submitApplication]);
 
   // Split fields into high / low confidence
   const highFields = fields?.filter((f) => f.confidence >= 0.7) ?? [];
@@ -296,39 +362,46 @@ export function Popup() {
         {/* Fill done banner */}
         {fillDone && !error && (
           <div className="rounded-md bg-green-50 border border-green-200 px-3 py-2 text-xs text-green-700">
-            Fields filled successfully.
+            Filled {lastFilledCount} field{lastFilledCount === 1 ? "" : "s"} successfully.
           </div>
         )}
 
         {/* Primary actions */}
         <div className="flex gap-2">
           <button
-            onClick={handleScan}
+            onClick={handleFill}
             disabled={!hasProfile || isWorking}
             className={[
-              "flex-1 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+              "flex-1 rounded-md px-3 py-2 text-sm font-medium transition-colors flex items-center justify-center gap-1.5",
               hasProfile && !isWorking
                 ? "bg-indigo-600 text-white hover:bg-indigo-700"
                 : "bg-gray-100 text-gray-400 cursor-not-allowed",
             ].join(" ")}
           >
-            {phase === "scanning" ? "Scanning…" : "Scan Page"}
+            {phase === "filling" ? (
+              "Filling…"
+            ) : (
+              <>
+                <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                  <path d="M11.25 1.5a.75.75 0 00-1.37-.16l-6 9A.75.75 0 004.5 11.5h4.71l-1.45 6.54a.75.75 0 001.36.56l6.5-10A.75.75 0 0015 7.5h-4.68l.93-5.25z" />
+                </svg>
+                {fillDone ? `Filled (${lastFilledCount})` : "Fill"}
+              </>
+            )}
           </button>
 
-          {fields !== null && fields.length > 0 && (
-            <button
-              onClick={handleFillAll}
-              disabled={isWorking}
-              className={[
-                "flex-1 rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                !isWorking
-                  ? "bg-green-600 text-white hover:bg-green-700"
-                  : "bg-gray-100 text-gray-400 cursor-not-allowed",
-              ].join(" ")}
-            >
-              {phase === "filling" ? "Filling…" : "Fill All"}
-            </button>
-          )}
+          <button
+            onClick={handleFillAndSubmit}
+            disabled={!hasProfile || isWorking}
+            className={[
+              "flex-1 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+              hasProfile && !isWorking
+                ? "bg-green-600 text-white hover:bg-green-700"
+                : "bg-gray-100 text-gray-400 cursor-not-allowed",
+            ].join(" ")}
+          >
+            {phase === "submitting" ? "Submitting…" : "Fill & Submit"}
+          </button>
         </div>
 
         {/* Field list — high confidence */}
@@ -369,7 +442,7 @@ export function Popup() {
         {/* Submit */}
         {fields !== null && fields.length > 0 && (
           <button
-            onClick={handleSubmit}
+            onClick={submitApplication}
             disabled={isWorking}
             className={[
               "w-full rounded-md px-3 py-2 text-sm font-medium border transition-colors",

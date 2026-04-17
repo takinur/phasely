@@ -33,7 +33,7 @@ export type Message =
   | { type: "DETECT_FIELDS"; profile?: Profile }
   | { type: "FILL_ALL"; profile: Profile; resume: StoredResume | null }
   | { type: "FILL_ONLY"; fields: string[]; profile: Profile }
-  | { type: "SUBMIT" }
+  | { type: "SUBMIT"; settings?: Pick<ExtensionSettings, "confirmBeforeSubmit"> }
   | { type: "GENERATE_AI"; question: string; fieldKey: string }
   | { type: "GET_PROFILE" }
   | { type: "SAVE_PROFILE"; markdown: string }
@@ -129,9 +129,11 @@ async function handleFillOnly(
   }
 }
 
-async function handleSubmit(): Promise<Response<Record<never, never>>> {
+async function handleSubmit(
+  settings?: Pick<ExtensionSettings, "confirmBeforeSubmit">,
+): Promise<Response<Record<never, never>>> {
   try {
-    await forwardToActiveTab({ type: "SUBMIT" });
+    await forwardToActiveTab({ type: "SUBMIT", settings });
     return { ok: true };
   } catch (err) {
     return { ok: false, error: String(err) };
@@ -331,7 +333,7 @@ chrome.runtime.onMessage.addListener(
             break;
 
           case "SUBMIT":
-            sendResponse(await handleSubmit());
+            sendResponse(await handleSubmit(msg.settings));
             break;
 
           case "GENERATE_AI":
