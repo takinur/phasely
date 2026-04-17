@@ -430,11 +430,6 @@ function SettingsSection({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
 
-  // Keep draft in sync when settings prop changes (initial load)
-  useEffect(() => {
-    setDraft(settings);
-  }, [settings]);
-
   const handleSave = useCallback(async () => {
     setSaving(true);
     setSaveError(null);
@@ -703,6 +698,7 @@ export function Options() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [resumeFilename, setResumeFilename] = useState<string | null>(null);
   const [settings, setSettings] = useState<ExtensionSettings>(DEFAULT_SETTINGS);
+  const [settingsResetKey, setSettingsResetKey] = useState(0);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -735,6 +731,7 @@ export function Options() {
     setProfile(null);
     setResumeFilename(null);
     setSettings(DEFAULT_SETTINGS);
+    setSettingsResetKey((k) => k + 1);
   }, []);
 
   if (loading) {
@@ -785,6 +782,7 @@ export function Options() {
         />
 
         <SettingsSection
+          key={settingsResetKey}
           settings={settings}
           onSettingsSaved={setSettings}
         />

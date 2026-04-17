@@ -7,7 +7,7 @@
  * the framework's internal change detection.
  */
 
-import type { DetectedField, Profile } from "@/lib/types"
+import type { DetectedField } from "@/lib/types"
 
 // ---------------------------------------------------------------------------
 // Debug utility
@@ -217,7 +217,7 @@ export function setFile(el: HTMLInputElement, blob: Blob, filename: string): voi
  * Fill a single DetectedField using the appropriate setter.
  * Never throws — errors are caught and logged with the [Phasely] prefix.
  */
-export function fillField(field: DetectedField, _profile: Profile): void {
+export function fillField(field: DetectedField): void {
   try {
     const { element, fieldType, suggestedValue, profileKey } = field
 

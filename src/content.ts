@@ -67,7 +67,7 @@ chrome.runtime.onMessage.addListener(
                   fillFile(field.element as HTMLInputElement, blob, resume.filename)
                 }
               } else {
-                fillField(field, profile)
+                fillField(field)
               }
             }
 
@@ -80,7 +80,7 @@ chrome.runtime.onMessage.addListener(
             const keys = new Set(msg.fields as string[])
             const fields = detectFields(profile).filter((f) => keys.has(f.profileKey))
             for (const field of fields) {
-              fillField(field, profile)
+              fillField(field)
             }
             sendResponse({ ok: true })
             break

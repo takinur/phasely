@@ -141,10 +141,7 @@ async function handleSubmit(): Promise<Response<Record<never, never>>> {
 // CLAUDE_INTEGRATION: dormant — activate in next feature release
 // const anthropic = new Anthropic({ apiKey: settings.claudeApiKey })
 
-function handleGenerateAI(
-  _question: string,
-  _fieldKey: string,
-): ErrResponse {
+function handleGenerateAI(): ErrResponse {
   // GEMINI_INTEGRATION: dormant — wire GeminiClient here when AI is activated
   return { ok: false, error: "AI not activated" };
 }
@@ -338,7 +335,7 @@ chrome.runtime.onMessage.addListener(
             break;
 
           case "GENERATE_AI":
-            sendResponse(handleGenerateAI(msg.question, msg.fieldKey));
+            sendResponse(handleGenerateAI());
             break;
 
           case "GET_PROFILE":
