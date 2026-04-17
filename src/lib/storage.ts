@@ -7,7 +7,7 @@
  *   - No raw encryption key material is ever persisted to storage.
  */
 
-import type { ExtensionSettings, Profile, StoredData, StoredResume } from "@/lib/types";
+import type { ExtensionSettings, Profile, ProfilePreset, StoredData, StoredResume } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
 // Chrome storage promise wrappers

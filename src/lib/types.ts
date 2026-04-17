@@ -61,9 +61,23 @@ export interface StoredResume {
   mimeType: string
 }
 
+export interface ProfilePreset {
+  id: string;
+  name: string;
+  overrides: {
+    currentTitle?: string;
+    salaryExpectation?: string;
+    noticePeriod?: string;
+    remotePreference?: string;
+    workAuth?: string;
+    willingToRelocate?: boolean;
+  };
+}
+
 export interface StoredData {
   profile: Profile | null
   resume: StoredResume | null
   settings: ExtensionSettings
   geminiToken: string | null  // OAuth token, managed by chrome.identity
+  presets: ProfilePreset[]
 }
