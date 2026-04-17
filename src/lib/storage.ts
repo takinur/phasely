@@ -319,6 +319,40 @@ export async function getResume(passphrase?: string): Promise<StoredResume | nul
 }
 
 // ---------------------------------------------------------------------------
+// Gemini token helpers
+// ---------------------------------------------------------------------------
+
+const KEY_GEMINI_TOKEN = "geminiToken";
+
+/**
+ * Encrypt and persist the Google OAuth token.
+ */
+export async function setGeminiToken(token: string): Promise<void> {
+  try {
+    const encrypted = await encryptData(token);
+    await storageSet(KEY_GEMINI_TOKEN, encrypted);
+  } catch (err) {
+    console.error("[Phasely] setGeminiToken failed:", err);
+    throw err;
+  }
+}
+
+/**
+ * Retrieve and decrypt the Google OAuth token.
+ * Returns null if not yet stored.
+ */
+export async function getGeminiToken(): Promise<string | null> {
+  try {
+    const stored = await storageGet<{ iv: string; data: string }>(KEY_GEMINI_TOKEN);
+    if (stored === null) return null;
+    return await decryptData(stored.iv, stored.data);
+  } catch (err) {
+    console.error("[Phasely] getGeminiToken failed:", err);
+    throw err;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Generic typed get / set — keyed on StoredData
 // ---------------------------------------------------------------------------
 

@@ -108,4 +108,130 @@ describe("profileToMarkdown", () => {
     expect(markdown).toContain("email: sam@example.com");
     expect(markdown).not.toContain("rawMarkdown");
   });
+
+  it("includes optional URL fields only when defined", () => {
+    const withUrls = profileToMarkdown({
+      firstName: "Kim",
+      lastName: "Park",
+      email: "kim@example.com",
+      phone: "",
+      location: "",
+      workAuth: "",
+      noticePeriod: "",
+      salaryExpectation: "",
+      willingToRelocate: false,
+      remotePreference: "",
+      currentTitle: "",
+      currentCompany: "",
+      yearsExperience: 0,
+      skills: [],
+      education: [],
+      referencesAvailable: false,
+      rawMarkdown: "",
+      linkedin: "https://linkedin.com/in/kim",
+      github: "https://github.com/kim",
+    });
+
+    expect(withUrls).toContain("linkedin:");
+    expect(withUrls).toContain("github:");
+    expect(withUrls).not.toContain("portfolio:");
+  });
+});
+
+describe("parseProfile — edge cases", () => {
+  it("parses optional fields when present", () => {
+    const markdown = `---
+firstName: Grace
+lastName: Hopper
+email: grace@navy.mil
+linkedin: https://linkedin.com/in/grace
+github: https://github.com/grace
+portfolio: https://grace.dev
+---`;
+    const profile = parseProfile(markdown);
+    expect(profile.linkedin).toBe("https://linkedin.com/in/grace");
+    expect(profile.github).toBe("https://github.com/grace");
+    expect(profile.portfolio).toBe("https://grace.dev");
+  });
+
+  it("sets optional URL fields to undefined when absent", () => {
+    const markdown = `---
+firstName: Grace
+lastName: Hopper
+email: grace@navy.mil
+---`;
+    const profile = parseProfile(markdown);
+    expect(profile.linkedin).toBeUndefined();
+    expect(profile.github).toBeUndefined();
+    expect(profile.portfolio).toBeUndefined();
+  });
+
+  it("coerces yearsExperience from a string number in front-matter", () => {
+    const markdown = `---
+firstName: Alan
+lastName: Turing
+email: alan@bletchley.uk
+yearsExperience: "10"
+---`;
+    const profile = parseProfile(markdown);
+    expect(profile.yearsExperience).toBe(10);
+  });
+
+  it("returns empty skills array when field is missing", () => {
+    const markdown = `---
+firstName: Alan
+lastName: Turing
+email: alan@bletchley.uk
+---`;
+    const profile = parseProfile(markdown);
+    expect(profile.skills).toEqual([]);
+  });
+
+  it("collects all missing required fields in a single error", () => {
+    try {
+      parseProfile("---\n---");
+      expect.fail("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ProfileParseError);
+      const e = err as ProfileParseError;
+      expect(e.fields.length).toBeGreaterThanOrEqual(3);
+      expect(e.fields.some((f) => f.includes("firstName"))).toBe(true);
+      expect(e.fields.some((f) => f.includes("lastName"))).toBe(true);
+      expect(e.fields.some((f) => f.includes("email"))).toBe(true);
+    }
+  });
+});
+
+describe("validateProfile — coercions", () => {
+  it("coerces boolean string variants", () => {
+    const p = validateProfile({
+      firstName: "X",
+      lastName: "Y",
+      email: "x@y.com",
+      willingToRelocate: "yes",
+      referencesAvailable: "no",
+    });
+    expect(p.willingToRelocate).toBe(true);
+    expect(p.referencesAvailable).toBe(false);
+  });
+
+  it("defaults yearsExperience to 0 for non-numeric input", () => {
+    const p = validateProfile({
+      firstName: "X",
+      lastName: "Y",
+      email: "x@y.com",
+      yearsExperience: "not-a-number",
+    });
+    expect(p.yearsExperience).toBe(0);
+  });
+
+  it("filters non-string items out of skills array", () => {
+    const p = validateProfile({
+      firstName: "X",
+      lastName: "Y",
+      email: "x@y.com",
+      skills: ["TypeScript", 42, null, "React"],
+    });
+    expect(p.skills).toEqual(["TypeScript", "React"]);
+  });
 });

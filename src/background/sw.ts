@@ -9,7 +9,7 @@
  *   - All chrome.* calls are wrapped in try/catch with [Phasely] prefix logging.
  */
 
-import { getProfile, setProfile, getResume, setResume, getSettings, setSettings } from "@/lib/storage";
+import { getProfile, setProfile, getResume, setResume, getSettings, setSettings, setGeminiToken } from "@/lib/storage";
 import type { StoredResume } from "@/lib/types";
 import { parseProfile, ProfileParseError } from "@/lib/profile";
 import type { DetectedField, ExtensionSettings, JobContext, Profile } from "@/lib/types";
@@ -30,7 +30,7 @@ function debug(...args: unknown[]): void {
 
 export type Message =
   | { type: "DETECT_FIELDS"; profile?: Profile }
-  | { type: "FILL_ALL"; profile: Profile }
+  | { type: "FILL_ALL"; profile: Profile; resume: StoredResume | null }
   | { type: "FILL_ONLY"; fields: string[]; profile: Profile }
   | { type: "SUBMIT" }
   | { type: "GENERATE_AI"; question: string; fieldKey: string }
@@ -288,18 +288,8 @@ async function handleAuthGoogle(): Promise<Response<{ token: string }>> {
 
     debug("AUTH_GOOGLE: token acquired via getAuthToken");
 
-    // Persist the token so the Gemini client can retrieve it.
-    // Uses chrome.storage.local — content of token is not a secret we own
-    // (Google can revoke it at any time) but we still namespace it clearly.
-    await new Promise<void>((resolve, reject) => {
-      chrome.storage.local.set({ geminiToken: token }, () => {
-        if (chrome.runtime.lastError) {
-          reject(new Error(chrome.runtime.lastError.message));
-        } else {
-          resolve();
-        }
-      });
-    });
+    // Persist the token encrypted so it is consistent with the rest of stored data.
+    await setGeminiToken(token);
 
     return { ok: true, token };
   } catch (err) {
@@ -370,9 +360,19 @@ chrome.runtime.onMessage.addListener(
             sendResponse(await handleGetResume());
             break;
 
-          case "SAVE_RESUME":
-            sendResponse(await handleSaveResume(msg.base64, msg.filename, msg.mimeType));
+          case "SAVE_RESUME": {
+            const raw = msg as unknown as Record<string, unknown>;
+            if (
+              typeof raw.base64 !== "string" ||
+              typeof raw.filename !== "string" ||
+              typeof raw.mimeType !== "string"
+            ) {
+              sendResponse({ ok: false, error: "SAVE_RESUME: missing or invalid fields" });
+              break;
+            }
+            sendResponse(await handleSaveResume(raw.base64, raw.filename, raw.mimeType));
             break;
+          }
 
           case "GET_SETTINGS":
             sendResponse(await handleGetSettings());

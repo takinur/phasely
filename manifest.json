@@ -13,7 +13,7 @@
     },
     "content_scripts": [
         {
-            "matches": ["https://*/*", "http://*/*"],
+            "matches": ["https://*/*"],
             "js": ["src/content.ts"],
             "run_at": "document_idle"
         }

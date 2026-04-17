@@ -25,4 +25,31 @@ describe("FIELD_MAP", () => {
       }
     }
   });
+
+  it("has at least 2 aliases per key", () => {
+    for (const [key, aliases] of Object.entries(FIELD_MAP)) {
+      expect(aliases.length, `${key} should have ≥ 2 aliases`).toBeGreaterThanOrEqual(2);
+    }
+  });
+
+  it("no alias is shared between two different keys", () => {
+    const seen = new Map<string, string>(); // alias → first key that owns it
+    for (const [key, aliases] of Object.entries(FIELD_MAP)) {
+      for (const alias of aliases) {
+        const owner = seen.get(alias);
+        expect(owner, `alias "${alias}" is claimed by both "${owner}" and "${key}"`).toBeUndefined();
+        seen.set(alias, key);
+      }
+    }
+  });
+
+  it("contains a key for resume / file upload matching", () => {
+    // The detector uses this to identify file input fields for resume upload
+    expect(FIELD_MAP).toHaveProperty("resumeUrl");
+  });
+
+  it("contains keys for AI-generated fields", () => {
+    expect(FIELD_MAP).toHaveProperty("coverLetter");
+    expect(FIELD_MAP).toHaveProperty("additionalInfo");
+  });
 });
