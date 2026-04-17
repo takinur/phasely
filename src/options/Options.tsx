@@ -132,7 +132,6 @@ function ProfileSection({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const injectionHits = useMemo(() => detectInjection(markdown), [markdown]);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleSave = useCallback(async () => {
     if (!markdown.trim()) return;
@@ -155,22 +154,6 @@ function ProfileSection({
     }
   }, [markdown, onProfileSaved]);
 
-  const handleFileChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        const text = ev.target?.result;
-        if (typeof text === "string") setMarkdown(text);
-      };
-      reader.readAsText(file);
-      // Reset so same file can be re-selected
-      e.target.value = "";
-    },
-    [],
-  );
-
   const handleExport = useCallback(() => {
     if (!profile) return;
     const md = profileToMarkdown(profile);
@@ -187,7 +170,7 @@ function ProfileSection({
     <section className="rounded-lg border border-gray-200 p-6">
       <SectionHeader
         title="Profile"
-        subtitle="Import your profile.md file to power autofill. Required fields: firstName, lastName, email."
+        subtitle="Paste your profile markdown below. Phasely uses it to autofill every application field."
       />
 
       {/* Current profile summary */}
@@ -238,27 +221,17 @@ function ProfileSection({
         </div>
       )}
 
-      {/* Import area */}
-      <div className="space-y-3">
-        <div className="flex gap-2">
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            className="rounded-md px-3 py-1.5 text-sm font-medium border border-gray-300 text-gray-700 hover:border-gray-400 hover:bg-gray-50 transition-colors"
-          >
-            Choose file…
-          </button>
-          <span className="text-sm text-gray-400 self-center">
-            or paste markdown below
-          </span>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".md,.txt"
-            className="hidden"
-            onChange={handleFileChange}
-          />
-        </div>
+      {/* AI generation hint */}
+      <div className="mb-4 rounded-md bg-indigo-50 border border-indigo-100 px-4 py-3 text-xs text-indigo-800">
+        <span className="font-semibold">Tip:</span> Ask ChatGPT or Gemini —{" "}
+        <span className="italic">
+          "Generate a Phasely job-application profile in YAML front-matter markdown for a [your role] with [X] years of experience. Include all fields from the template below."
+        </span>{" "}
+        — then paste the result here and edit your details.
+      </div>
 
+      {/* Paste area */}
+      <div className="space-y-3">
         <textarea
           value={markdown}
           onChange={(e) => {
@@ -266,8 +239,8 @@ function ProfileSection({
             setSaveSuccess(false);
             setSaveError(null);
           }}
-          placeholder={`---\nfirstName: Jane\nlastName: Doe\nemail: jane@example.com\nphone: +1 555 000 0000\nlocation: New York, NY\ncurrentTitle: Software Engineer\ncurrentCompany: Acme Corp\nyearsExperience: 5\nworkAuth: US Citizen\nnoticePeriod: 2 weeks\nsalaryExpectation: $120,000\nwillingToRelocate: false\nremotePreference: Remote\nskills:\n  - TypeScript\n  - React\n---`}
-          rows={12}
+          placeholder={`---\nfirstName: Alex\nlastName: Chen\nemail: alex.chen@example.com\nphone: +1 415 555 0192\nlocation: San Francisco, CA\ncurrentTitle: Senior Software Engineer\ncurrentCompany: Acme Corp\nyearsExperience: 7\nworkAuth: US Citizen\nnoticePeriod: 2 weeks\nsalaryExpectation: $160,000\nwillingToRelocate: false\nremotePreference: Remote\nlinkedin: https://linkedin.com/in/alexchen\ngithub: https://github.com/alexchen\nportfolio: https://alexchen.dev\nskills:\n  - TypeScript\n  - React\n  - Node.js\n  - PostgreSQL\n  - AWS\n  - Docker\neducation:\n  - degree: BSc Computer Science\n    institution: UC Berkeley\n    year: 2017\nreferencesAvailable: true\n---\n\n## Summary\n\nResults-driven software engineer with 7 years of experience building scalable web applications and APIs. Track record of reducing latency, cutting infrastructure costs, and mentoring junior engineers.\n\n## Experience\n\n**Senior Software Engineer — Acme Corp** (2021–present)\n- Led migration from monolith to microservices, reducing p99 latency by 40%\n- Mentored 3 junior engineers and introduced PR standards adopted team-wide\n\n**Software Engineer — StartupXYZ** (2018–2021)\n- Built real-time collaboration features serving 50k daily active users\n- Cut cloud spend by $120k/year through query and caching optimisations`}
+          rows={18}
           className={[
             "w-full rounded-md border px-3 py-2 text-xs font-mono text-gray-700 placeholder:text-gray-300 focus:outline-none focus:ring-2 focus:border-transparent resize-y",
             injectionHits.length > 0
@@ -795,9 +768,8 @@ export function Options() {
         <div className="rounded-xl border border-indigo-100 bg-gradient-to-br from-indigo-50 to-white px-6 py-5">
           <h2 className="text-sm font-semibold text-indigo-900 mb-1.5">One profile. Every application.</h2>
           <p className="text-sm text-gray-600 leading-relaxed">
-            Phasely reads your <code className="text-xs bg-indigo-100 text-indigo-700 px-1 py-0.5 rounded">profile.md</code> once,
-            then autofills any job application form in a single click — Workday, Greenhouse, Lever, iCIMS, and more.
-            Your data is encrypted on your device and never sent to any Phasely server.
+            Describe yourself once in a simple markdown format, then let Phasely autofill any job application in a single click —
+            Workday, Greenhouse, Lever, iCIMS, and more. Your data is encrypted on your device and never sent to any Phasely server.
             AI-written fields (cover letters, open questions) call Gemini directly from your browser using your Google account.
           </p>
           <div className="mt-3 flex flex-wrap gap-3 text-xs text-gray-500">
