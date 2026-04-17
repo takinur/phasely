@@ -15,7 +15,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import type { DetectedField, ExtensionSettings, JobContext, Profile } from "@/lib/types";
+import type { DetectedField, ExtensionSettings, JobContext, Profile, StoredResume } from "@/lib/types";
 import logoIcon from "@/assets/phasely-icon.svg";
 
 // ---------------------------------------------------------------------------
@@ -25,6 +25,7 @@ import logoIcon from "@/assets/phasely-icon.svg";
 type MsgPayload =
   | { type: "GET_PROFILE" }
   | { type: "GET_SETTINGS" }
+  | { type: "GET_RESUME" }
   | { type: "DETECT_FIELDS"; profile?: Profile }
   | { type: "FILL_ALL"; profile: Profile }
   | { type: "FILL_ONLY"; fields: string[]; profile: Profile }
@@ -97,6 +98,49 @@ function FieldRow({
   );
 }
 
+const COLLAPSED_COUNT = 3;
+
+function CollapsibleFieldList({
+  fields,
+  onFillOne,
+  label,
+  headingClass,
+  borderClass,
+  bgClass,
+}: {
+  fields: DetectedField[];
+  onFillOne: (key: string) => void;
+  label: string;
+  headingClass: string;
+  borderClass: string;
+  bgClass: string;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const visible = expanded ? fields : fields.slice(0, COLLAPSED_COUNT);
+  const hiddenCount = fields.length - COLLAPSED_COUNT;
+
+  return (
+    <section>
+      <h2 className={`text-xs font-semibold uppercase tracking-wide mb-1 ${headingClass}`}>
+        {label} ({fields.length})
+      </h2>
+      <ul className={`rounded-md border px-3 ${borderClass} ${bgClass}`}>
+        {visible.map((f, i) => (
+          <FieldRow key={`${label}-${i}`} field={f} onFillOne={onFillOne} />
+        ))}
+      </ul>
+      {fields.length > COLLAPSED_COUNT && (
+        <button
+          onClick={() => setExpanded((prev) => !prev)}
+          className="mt-1 text-xs text-indigo-500 hover:text-indigo-700 hover:underline w-full text-left px-1"
+        >
+          {expanded ? "Show less" : `Show ${hiddenCount} more`}
+        </button>
+      )}
+    </section>
+  );
+}
+
 function StatusDot({ ok }: { ok: boolean }) {
   return (
     <span
@@ -133,6 +177,7 @@ type Phase = "idle" | "filling" | "submitting";
 export function Popup() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [settings, setSettings] = useState<ExtensionSettings | null>(null);
+  const [hasResume, setHasResume] = useState(false);
   const [fields, setFields] = useState<DetectedField[] | null>(null);
   const [jobContext, setJobContext] = useState<JobContext | null>(null);
   const [phase, setPhase] = useState<Phase>("idle");
@@ -140,18 +185,20 @@ export function Popup() {
   const [fillDone, setFillDone] = useState(false);
   const [lastFilledCount, setLastFilledCount] = useState(0);
 
-  // Load profile + settings once on mount
+  // Load profile + resume + settings once on mount
   useEffect(() => {
     let cancelled = false;
 
     (async () => {
       try {
-        const [pRes, sRes] = await Promise.all([
+        const [pRes, rRes, sRes] = await Promise.all([
           sendMsg<{ ok: boolean; profile: Profile | null }>({ type: "GET_PROFILE" }),
+          sendMsg<{ ok: boolean; resume: StoredResume | null }>({ type: "GET_RESUME" }),
           sendMsg<{ ok: boolean; settings: ExtensionSettings }>({ type: "GET_SETTINGS" }),
         ]);
         if (cancelled) return;
         if (pRes.ok) setProfile(pRes.profile);
+        if (rRes.ok) setHasResume(rRes.resume !== null);
         if (sRes.ok) setSettings(sRes.settings);
       } catch (err) {
         if (!cancelled) setError(String(err));
@@ -291,6 +338,8 @@ export function Popup() {
 
   const hasProfile = profile !== null;
   const isWorking = phase !== "idle";
+  // Fill is only allowed when both profile AND resume are present.
+  const canFill = hasProfile && hasResume && !isWorking;
 
   return (
     <div className="w-80 min-h-36 bg-white font-sans text-sm flex flex-col">
@@ -299,7 +348,8 @@ export function Popup() {
         <div className="flex items-center gap-2">
           <img src={logoIcon} alt="Phasely logo" className="w-5 h-5 rounded" />
           <span className="font-bold text-base tracking-tight text-gray-900">Phasely</span>
-          <StatusDot ok={hasProfile} />
+          {/* Dot is green only when ready to fill (profile + resume present) */}
+          <StatusDot ok={hasProfile && hasResume} />
         </div>
         <a
           href={chrome.runtime.getURL("src/options.html")}
@@ -324,7 +374,23 @@ export function Popup() {
             >
               Settings
             </a>{" "}
-            to import your profile.md.
+            to import your profile.
+          </div>
+        )}
+
+        {/* No resume warning — shown when profile exists but resume is missing */}
+        {hasProfile && !hasResume && (
+          <div className="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
+            <span className="font-semibold">Resume required.</span> Upload your resume in{" "}
+            <a
+              href={chrome.runtime.getURL("src/options.html")}
+              target="_blank"
+              rel="noreferrer"
+              className="underline font-medium"
+            >
+              Settings
+            </a>{" "}
+            before filling.
           </div>
         )}
 
@@ -366,14 +432,14 @@ export function Popup() {
           </div>
         )}
 
-        {/* Primary actions */}
+        {/* Primary fill actions — disabled until both profile and resume are present */}
         <div className="flex gap-2">
           <button
             onClick={handleFill}
-            disabled={!hasProfile || isWorking}
+            disabled={!canFill}
             className={[
               "flex-1 rounded-md px-3 py-2 text-sm font-medium transition-colors flex items-center justify-center gap-1.5",
-              hasProfile && !isWorking
+              canFill
                 ? "bg-indigo-600 text-white hover:bg-indigo-700"
                 : "bg-gray-100 text-gray-400 cursor-not-allowed",
             ].join(" ")}
@@ -392,10 +458,10 @@ export function Popup() {
 
           <button
             onClick={handleFillAndSubmit}
-            disabled={!hasProfile || isWorking}
+            disabled={!canFill}
             className={[
               "flex-1 rounded-md px-3 py-2 text-sm font-medium transition-colors",
-              hasProfile && !isWorking
+              canFill
                 ? "bg-green-600 text-white hover:bg-green-700"
                 : "bg-gray-100 text-gray-400 cursor-not-allowed",
             ].join(" ")}
@@ -404,42 +470,8 @@ export function Popup() {
           </button>
         </div>
 
-        {/* Field list — high confidence */}
-        {highFields.length > 0 && (
-          <section>
-            <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
-              High confidence ({highFields.length})
-            </h2>
-            <ul className="rounded-md border border-gray-200 px-3 bg-gray-50">
-              {highFields.map((f, i) => (
-                <FieldRow key={`high-${i}`} field={f} onFillOne={handleFillOne} />
-              ))}
-            </ul>
-          </section>
-        )}
-
-        {/* Field list — amber */}
-        {lowFields.length > 0 && (
-          <section>
-            <h2 className="text-xs font-semibold text-amber-600 uppercase tracking-wide mb-1">
-              Needs review ({lowFields.length})
-            </h2>
-            <ul className="rounded-md border border-amber-200 px-3 bg-amber-50">
-              {lowFields.map((f, i) => (
-                <FieldRow key={`low-${i}`} field={f} onFillOne={handleFillOne} />
-              ))}
-            </ul>
-          </section>
-        )}
-
-        {/* No fields found */}
-        {fields !== null && fields.length === 0 && (
-          <p className="text-xs text-gray-400 text-center py-2">
-            No fillable fields detected on this page.
-          </p>
-        )}
-
-        {/* Submit */}
+        {/* Submit Application — above the field list so it's the first thing
+            visible after filling, not buried below a long detected-fields list */}
         {fields !== null && fields.length > 0 && (
           <button
             onClick={submitApplication}
@@ -453,6 +485,37 @@ export function Popup() {
           >
             {phase === "submitting" ? "Submitting…" : "Submit Application"}
           </button>
+        )}
+
+        {/* Field list — high confidence (3 shown, expand for rest) */}
+        {highFields.length > 0 && (
+          <CollapsibleFieldList
+            fields={highFields}
+            onFillOne={handleFillOne}
+            label="High confidence"
+            headingClass="text-gray-500"
+            borderClass="border-gray-200"
+            bgClass="bg-gray-50"
+          />
+        )}
+
+        {/* Field list — needs review (3 shown, expand for rest) */}
+        {lowFields.length > 0 && (
+          <CollapsibleFieldList
+            fields={lowFields}
+            onFillOne={handleFillOne}
+            label="Needs review"
+            headingClass="text-amber-600"
+            borderClass="border-amber-200"
+            bgClass="bg-amber-50"
+          />
+        )}
+
+        {/* No fields found */}
+        {fields !== null && fields.length === 0 && (
+          <p className="text-xs text-gray-400 text-center py-2">
+            No fillable fields detected on this page.
+          </p>
         )}
       </div>
     </div>

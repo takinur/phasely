@@ -59,8 +59,16 @@ describe("scoreField", () => {
     expect(scoreField(["fristname"], "firstName")).toBe(0.85);
   });
 
-  it("returns 0.6 for token overlap", () => {
-    expect(scoreField(["current title role"], "currentTitle")).toBe(0.6);
+  it("returns 0.75 for phrase subset (multi-word candidate contained in signal)", () => {
+    // "current_title" alias normalises to "current title", which is a 2-token
+    // subset of "current title role" → Tier 3 fires at 0.75, not 0.6.
+    expect(scoreField(["current title role"], "currentTitle")).toBe(0.75);
+  });
+
+  it("returns 0.6 for single-token overlap only", () => {
+    // "experience" is a single-token alias for yearsExperience.
+    // Tier 3 skips single-token candidates, so this falls through to Tier 4.
+    expect(scoreField(["please describe your relevant experience"], "yearsExperience")).toBe(0.6);
   });
 
   it("returns 0 when there is no match", () => {
