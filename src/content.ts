@@ -52,39 +52,22 @@ chrome.runtime.onMessage.addListener(
 
           case "FILL_ALL": {
             const profile = msg.profile as Profile
+            const resume = msg.resume as { base64: string; filename: string; mimeType: string } | null
             const fields = detectFields(profile)
-            const fileFields = fields.filter((f) => f.fieldType === "file")
-            const nonFileFields = fields.filter((f) => f.fieldType !== "file")
 
-            for (const field of nonFileFields) {
-              fillField(field, profile)
-            }
-
-            if (fileFields.length > 0) {
-              const resumeRes = await new Promise<{
-                ok: boolean
-                resume: { base64: string; filename: string; mimeType: string } | null
-              }>((resolve, reject) => {
-                chrome.runtime.sendMessage({ type: "GET_RESUME" }, (response) => {
-                  if (chrome.runtime.lastError) {
-                    reject(new Error(chrome.runtime.lastError.message))
-                  } else {
-                    resolve(response)
+            for (const field of fields) {
+              if (field.fieldType === "file") {
+                if (resume) {
+                  const binary = atob(resume.base64)
+                  const bytes = new Uint8Array(binary.length)
+                  for (let i = 0; i < binary.length; i++) {
+                    bytes[i] = binary.charCodeAt(i)
                   }
-                })
-              })
-
-              if (resumeRes.ok && resumeRes.resume) {
-                const { base64, filename, mimeType } = resumeRes.resume
-                const binary = atob(base64)
-                const bytes = new Uint8Array(binary.length)
-                for (let i = 0; i < binary.length; i++) {
-                  bytes[i] = binary.charCodeAt(i)
+                  const blob = new Blob([bytes], { type: resume.mimeType })
+                  fillFile(field.element as HTMLInputElement, blob, resume.filename)
                 }
-                const blob = new Blob([bytes], { type: mimeType })
-                for (const field of fileFields) {
-                  fillFile(field.element as HTMLInputElement, blob, filename)
-                }
+              } else {
+                fillField(field, profile)
               }
             }
 

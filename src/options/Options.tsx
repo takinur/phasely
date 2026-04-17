@@ -12,8 +12,9 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ExtensionSettings, Profile } from "@/lib/types";
+import type { ExtensionSettings, Profile, StoredResume } from "@/lib/types";
 import { profileToMarkdown } from "@/lib/profile";
+import { DEFAULT_SETTINGS } from "@/lib/defaults";
 
 // ---------------------------------------------------------------------------
 // Chrome message helper
@@ -39,17 +40,6 @@ function sendMsg<T = unknown>(payload: MsgPayload): Promise<T> {
     });
   });
 }
-
-// ---------------------------------------------------------------------------
-// Default settings
-// ---------------------------------------------------------------------------
-
-const DEFAULT_SETTINGS: ExtensionSettings = {
-  geminiModel: "gemini-1.5-flash",
-  autoSubmit: false,
-  confirmBeforeSubmit: true,
-  preferredAiProvider: "gemini",
-};
 
 // ---------------------------------------------------------------------------
 // Small shared UI primitives
@@ -724,7 +714,7 @@ export function Options() {
       try {
         const [pRes, rRes, sRes] = await Promise.all([
           sendMsg<{ ok: boolean; profile: Profile | null }>({ type: "GET_PROFILE" }),
-          sendMsg<{ ok: boolean; resume: { filename: string } | null }>({ type: "GET_RESUME" }),
+          sendMsg<{ ok: boolean; resume: StoredResume | null }>({ type: "GET_RESUME" }),
           sendMsg<{ ok: boolean; settings: ExtensionSettings }>({ type: "GET_SETTINGS" }),
         ]);
         if (cancelled) return;

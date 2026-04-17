@@ -359,6 +359,10 @@ export async function getGeminiToken(): Promise<string | null> {
 /**
  * Retrieve and decrypt any top-level StoredData key.
  * Returns null when the key has never been written.
+ *
+ * @internal Prefer the typed helpers (getProfile, getResume, getSettings,
+ * getGeminiToken). This function skips shape validation — callers must
+ * validate the returned value themselves.
  */
 export async function get<T extends StoredData[keyof StoredData]>(
   key: keyof StoredData,
@@ -376,6 +380,10 @@ export async function get<T extends StoredData[keyof StoredData]>(
 
 /**
  * Encrypt and persist any top-level StoredData key.
+ *
+ * @internal Prefer the typed helpers (setProfile, setResume, setSettings,
+ * setGeminiToken). This function accepts any serialisable value without
+ * type checking.
  */
 export async function set<T extends StoredData[keyof StoredData]>(
   key: keyof StoredData,

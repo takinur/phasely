@@ -10,6 +10,7 @@
  */
 
 import { getProfile, setProfile, getResume, setResume, getSettings, setSettings, setGeminiToken } from "@/lib/storage";
+import { DEFAULT_SETTINGS } from "@/lib/defaults";
 import type { StoredResume } from "@/lib/types";
 import { parseProfile, ProfileParseError } from "@/lib/profile";
 import type { DetectedField, ExtensionSettings, JobContext, Profile } from "@/lib/types";
@@ -106,7 +107,10 @@ async function handleFillAll(
   profile: Profile,
 ): Promise<Response<Record<never, never>>> {
   try {
-    await forwardToActiveTab({ type: "FILL_ALL", profile });
+    // Fetch the resume here in the SW so the content script never needs to
+    // make a nested round-trip back to the SW while handling FILL_ALL.
+    const resume = await getResume().catch(() => null);
+    await forwardToActiveTab({ type: "FILL_ALL", profile, resume });
     return { ok: true };
   } catch (err) {
     return { ok: false, error: String(err) };
@@ -173,17 +177,6 @@ async function handleSaveProfile(
     return { ok: false, error: String(err) };
   }
 }
-
-// ---------------------------------------------------------------------------
-// Default settings
-// ---------------------------------------------------------------------------
-
-const DEFAULT_SETTINGS: ExtensionSettings = {
-  geminiModel: "gemini-1.5-flash",
-  autoSubmit: false,
-  confirmBeforeSubmit: true,
-  preferredAiProvider: "gemini",
-};
 
 // ---------------------------------------------------------------------------
 // Settings handlers
