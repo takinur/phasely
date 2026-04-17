@@ -476,10 +476,12 @@ function SettingsSection({
   settings,
   onSettingsSaved,
   modelsRefreshKey,
+  onOauthEnabledChange,
 }: {
   settings: ExtensionSettings;
   onSettingsSaved: (s: ExtensionSettings) => void;
   modelsRefreshKey: number;
+  onOauthEnabledChange?: (enabled: boolean) => void;
 }) {
   const [draft, setDraft] = useState<ExtensionSettings>(settings);
   const [saving, setSaving] = useState(false);
@@ -506,12 +508,17 @@ function SettingsSection({
 
         const models = res.models ?? [];
         setOauthEnabled(res.oauthEnabled);
+        onOauthEnabledChange?.(res.oauthEnabled);
         setAvailableModels(models);
         setModelsError(null);
 
-        const firstModel = models[0];
-        if (res.oauthEnabled && firstModel && !models.includes(draft.geminiModel)) {
-          setDraft((prev) => ({ ...prev, geminiModel: firstModel }));
+        // Use functional setDraft to read current geminiModel without adding it
+        // as a dependency — avoids re-fetching models on every model change.
+        if (res.oauthEnabled && models.length > 0) {
+          setDraft((prev) => ({
+            ...prev,
+            geminiModel: models.includes(prev.geminiModel) ? prev.geminiModel : models[0],
+          }));
         }
       } catch (err) {
         if (!cancelled) setModelsError(String(err));
@@ -523,7 +530,8 @@ function SettingsSection({
     return () => {
       cancelled = true;
     };
-  }, [draft.geminiModel, modelsRefreshKey]);
+    // onOauthEnabledChange is setOauthEnabled from parent useState — stable ref, safe to include.
+  }, [modelsRefreshKey, onOauthEnabledChange]);
 
   const handleSave = useCallback(async () => {
     setSaving(true);
@@ -571,7 +579,12 @@ function SettingsSection({
               update("geminiModel", e.target.value as ExtensionSettings["geminiModel"])
             }
             disabled={!oauthEnabled || modelsLoading}
-            className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            className={[
+              "rounded-md border px-3 py-1.5 text-sm focus:outline-none focus:ring-2 transition-colors cursor-pointer disabled:cursor-not-allowed",
+              !oauthEnabled
+                ? "border-red-300 bg-red-50 text-red-400 focus:ring-red-400"
+                : "border-gray-300 text-gray-700 focus:ring-indigo-500",
+            ].join(" ")}
           >
             {availableModels.length > 0 ? (
               availableModels.map((model) => (
@@ -583,9 +596,12 @@ function SettingsSection({
               <option value={draft.geminiModel}>{draft.geminiModel}</option>
             )}
           </select>
-          <p className="text-xs text-gray-400 mt-1 disabled:opacity-50 disabled:pointer-events-none ">
+          <p className={[
+            "text-xs mt-1",
+            !oauthEnabled ? "text-red-500 font-medium" : "text-gray-400",
+          ].join(" ")}>
             {!oauthEnabled
-              ? "Enable AI feature first."
+              ? "Sign in with Google (above) to unlock model selection."
               : modelsLoading
                 ? "Loading available Gemini models…"
                 : "Used for AI-written fields (cover letter, open questions)."}
@@ -625,21 +641,24 @@ function SettingsSection({
 // Google Auth section
 // ---------------------------------------------------------------------------
 
-function AuthSection({ onAuthed }: { onAuthed: () => void }) {
+function AuthSection({
+  oauthEnabled,
+  onAuthed,
+}: {
+  oauthEnabled: boolean;
+  onAuthed: () => void;
+}) {
   const [authing, setAuthing] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
-  const [authSuccess, setAuthSuccess] = useState(false);
 
   const handleAuth = useCallback(async () => {
     setAuthing(true);
     setAuthError(null);
-    setAuthSuccess(false);
     try {
       const res = await sendMsg<{ ok: boolean; token?: string; error?: string }>({
         type: "AUTH_GOOGLE",
       });
       if (!res.ok) throw new Error(res.error ?? "Auth failed");
-      setAuthSuccess(true);
       onAuthed();
     } catch (err) {
       setAuthError(String(err));
@@ -649,17 +668,34 @@ function AuthSection({ onAuthed }: { onAuthed: () => void }) {
   }, [onAuthed]);
 
   return (
-    <section className="rounded-lg border border-gray-200 p-6">
-      <SectionHeader
-        title="Google Account (AI features)"
-        subtitle="Sign in with Google to enable AI-written cover letters and open questions. Your token never leaves your browser."
-      />
+    <section
+      className={[
+        "rounded-lg border p-6 transition-colors",
+        oauthEnabled ? "border-green-200 bg-green-50/40" : "border-gray-200",
+      ].join(" ")}
+    >
+      <div className="mb-4 flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-base font-semibold text-gray-900">Google Account (AI features)</h2>
+          <p className="text-sm text-gray-500 mt-0.5">
+            Sign in with Google to enable AI-written cover letters and open questions.
+            Your token never leaves your browser.
+          </p>
+        </div>
+        {oauthEnabled && (
+          <span className="shrink-0 flex items-center gap-1.5 rounded-full bg-green-100 border border-green-300 px-2.5 py-1 text-xs font-semibold text-green-800">
+            <span className="w-1.5 h-1.5 rounded-full bg-green-500 inline-block" />
+            Connected
+          </span>
+        )}
+      </div>
 
       <div className="space-y-3">
         {authError && <Alert type="error">{authError}</Alert>}
-        {authSuccess && (
+
+        {oauthEnabled && (
           <Alert type="success">
-            Signed in successfully. AI features are now active.
+            Google account connected. AI features are active.
           </Alert>
         )}
 
@@ -678,7 +714,7 @@ function AuthSection({ onAuthed }: { onAuthed: () => void }) {
           ) : (
             <>
               <GoogleIcon />
-              Sign in with Google
+              {oauthEnabled ? "Re-authenticate" : "Sign in with Google"}
             </>
           )}
         </button>
@@ -871,6 +907,7 @@ export function Options() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [resumeFilename, setResumeFilename] = useState<string | null>(null);
   const [settings, setSettings] = useState<ExtensionSettings>(DEFAULT_SETTINGS);
+  const [oauthEnabled, setOauthEnabled] = useState(false);
   const [settingsResetKey, setSettingsResetKey] = useState(0);
   const [modelsRefreshKey, setModelsRefreshKey] = useState(0);
   const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
@@ -920,6 +957,7 @@ export function Options() {
     setProfile(null);
     setResumeFilename(null);
     setSettings(DEFAULT_SETTINGS);
+    setOauthEnabled(false);
     setSettingsResetKey((k) => k + 1);
     setModelsRefreshKey((k) => k + 1);
   }, []);
@@ -1018,14 +1056,15 @@ export function Options() {
           onResumeSaved={setResumeFilename}
         />
 
+        <AuthSection oauthEnabled={oauthEnabled} onAuthed={handleAuthed} />
+
         <SettingsSection
           key={settingsResetKey}
           settings={settings}
           onSettingsSaved={setSettings}
           modelsRefreshKey={modelsRefreshKey}
+          onOauthEnabledChange={setOauthEnabled}
         />
-
-        <AuthSection onAuthed={handleAuthed} />
 
         <PremiumSection />
 
