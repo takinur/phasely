@@ -55,9 +55,15 @@ export interface ExtensionSettings {
   preferredAiProvider: "gemini" | "claude"  // "gemini" locked in v1
 }
 
+export interface StoredResume {
+  base64: string     // ArrayBuffer → base64 of the PDF bytes
+  filename: string
+  mimeType: string
+}
+
 export interface StoredData {
   profile: Profile | null
-  resumeBlob: string | null   // base64 encoded
+  resume: StoredResume | null
   settings: ExtensionSettings
   geminiToken: string | null  // OAuth token, managed by chrome.identity
 }

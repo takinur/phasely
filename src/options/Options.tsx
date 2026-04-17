@@ -22,6 +22,8 @@ import { profileToMarkdown } from "@/lib/profile";
 type MsgPayload =
   | { type: "GET_PROFILE" }
   | { type: "SAVE_PROFILE"; markdown: string }
+  | { type: "GET_RESUME" }
+  | { type: "SAVE_RESUME"; base64: string; filename: string; mimeType: string }
   | { type: "GET_SETTINGS" }
   | { type: "SAVE_SETTINGS"; settings: ExtensionSettings }
   | { type: "AUTH_GOOGLE" };
@@ -311,6 +313,118 @@ function ProfileField({ label, value }: { label: string; value: string }) {
 }
 
 // ---------------------------------------------------------------------------
+// Resume section
+// ---------------------------------------------------------------------------
+
+/**
+ * Read a File as an ArrayBuffer and return the bytes as a base64 string.
+ */
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const buffer = reader.result as ArrayBuffer
+      const bytes = new Uint8Array(buffer)
+      let binary = ""
+      for (let i = 0; i < bytes.length; i++) {
+        binary += String.fromCharCode(bytes[i])
+      }
+      resolve(btoa(binary))
+    }
+    reader.onerror = () => reject(reader.error)
+    reader.readAsArrayBuffer(file)
+  })
+}
+
+function ResumeSection({
+  storedFilename,
+  onResumeSaved,
+}: {
+  storedFilename: string | null
+  onResumeSaved: (filename: string) => void
+}) {
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [saveSuccess, setSaveSuccess] = useState(false)
+
+  const handleFileChange = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0]
+      if (!file) return
+      e.target.value = ""
+      setSaving(true)
+      setSaveError(null)
+      setSaveSuccess(false)
+      try {
+        const base64 = await fileToBase64(file)
+        const res = await sendMsg<{ ok: boolean; error?: string }>({
+          type: "SAVE_RESUME",
+          base64,
+          filename: file.name,
+          mimeType: file.type || "application/pdf",
+        })
+        if (!res.ok) throw new Error(res.error ?? "Save failed")
+        onResumeSaved(file.name)
+        setSaveSuccess(true)
+      } catch (err) {
+        setSaveError(String(err))
+      } finally {
+        setSaving(false)
+      }
+    },
+    [onResumeSaved],
+  )
+
+  return (
+    <section className="rounded-lg border border-gray-200 p-6">
+      <SectionHeader
+        title="Resume"
+        subtitle="Upload your resume PDF. It will be stored encrypted and attached to file-upload fields automatically."
+      />
+
+      <div className="space-y-3">
+        {storedFilename && (
+          <div className="flex items-center gap-2 rounded-md bg-gray-50 border border-gray-200 px-3 py-2 text-sm text-gray-700">
+            <svg className="w-4 h-4 text-red-500 shrink-0" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+              <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 000 2h6a1 1 0 100-2H7z" clipRule="evenodd" />
+            </svg>
+            <span className="truncate font-medium">{storedFilename}</span>
+            <span className="ml-auto text-xs text-gray-400 shrink-0">stored</span>
+          </div>
+        )}
+
+        {saveError && <Alert type="error">{saveError}</Alert>}
+        {saveSuccess && <Alert type="success">Resume saved and encrypted successfully.</Alert>}
+
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={saving}
+            className={[
+              "rounded-md px-3 py-1.5 text-sm font-medium border transition-colors",
+              !saving
+                ? "border-gray-300 text-gray-700 hover:border-gray-400 hover:bg-gray-50"
+                : "border-gray-200 text-gray-300 cursor-not-allowed",
+            ].join(" ")}
+          >
+            {saving ? "Saving…" : storedFilename ? "Replace resume…" : "Upload resume…"}
+          </button>
+          <span className="text-xs text-gray-400">PDF, DOC, or DOCX</span>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            className="hidden"
+            onChange={handleFileChange}
+          />
+        </div>
+      </div>
+    </section>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Settings section
 // ---------------------------------------------------------------------------
 
@@ -597,22 +711,25 @@ function DangerZone({ onWiped }: { onWiped: () => void }) {
 
 export function Options() {
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [resumeFilename, setResumeFilename] = useState<string | null>(null);
   const [settings, setSettings] = useState<ExtensionSettings>(DEFAULT_SETTINGS);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  // Load profile + settings on mount
+  // Load profile + resume + settings on mount
   useEffect(() => {
     let cancelled = false;
 
     (async () => {
       try {
-        const [pRes, sRes] = await Promise.all([
+        const [pRes, rRes, sRes] = await Promise.all([
           sendMsg<{ ok: boolean; profile: Profile | null }>({ type: "GET_PROFILE" }),
+          sendMsg<{ ok: boolean; resume: { filename: string } | null }>({ type: "GET_RESUME" }),
           sendMsg<{ ok: boolean; settings: ExtensionSettings }>({ type: "GET_SETTINGS" }),
         ]);
         if (cancelled) return;
         if (pRes.ok) setProfile(pRes.profile);
+        if (rRes.ok && rRes.resume) setResumeFilename(rRes.resume.filename);
         if (sRes.ok) setSettings(sRes.settings ?? DEFAULT_SETTINGS);
       } catch (err) {
         if (!cancelled) setLoadError(String(err));
@@ -626,6 +743,7 @@ export function Options() {
 
   const handleWiped = useCallback(() => {
     setProfile(null);
+    setResumeFilename(null);
     setSettings(DEFAULT_SETTINGS);
   }, []);
 
@@ -669,6 +787,11 @@ export function Options() {
         <ProfileSection
           profile={profile}
           onProfileSaved={setProfile}
+        />
+
+        <ResumeSection
+          storedFilename={resumeFilename}
+          onResumeSaved={setResumeFilename}
         />
 
         <SettingsSection

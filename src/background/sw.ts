@@ -9,7 +9,8 @@
  *   - All chrome.* calls are wrapped in try/catch with [Phasely] prefix logging.
  */
 
-import { getProfile, setProfile, getSettings, setSettings } from "@/lib/storage";
+import { getProfile, setProfile, getResume, setResume, getSettings, setSettings } from "@/lib/storage";
+import type { StoredResume } from "@/lib/types";
 import { parseProfile, ProfileParseError } from "@/lib/profile";
 import type { DetectedField, ExtensionSettings, JobContext, Profile } from "@/lib/types";
 
@@ -35,6 +36,8 @@ export type Message =
   | { type: "GENERATE_AI"; question: string; fieldKey: string }
   | { type: "GET_PROFILE" }
   | { type: "SAVE_PROFILE"; markdown: string }
+  | { type: "GET_RESUME" }
+  | { type: "SAVE_RESUME"; base64: string; filename: string; mimeType: string }
   | { type: "GET_SETTINGS" }
   | { type: "SAVE_SETTINGS"; settings: ExtensionSettings }
   | { type: "AUTH_GOOGLE" };
@@ -210,6 +213,34 @@ async function handleSaveSettings(
 }
 
 // ---------------------------------------------------------------------------
+// Resume handlers
+// ---------------------------------------------------------------------------
+
+async function handleGetResume(): Promise<Response<{ resume: StoredResume | null }>> {
+  try {
+    const resume = await getResume();
+    debug("GET_RESUME:", resume ? resume.filename : "null");
+    return { ok: true, resume };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
+async function handleSaveResume(
+  base64: string,
+  filename: string,
+  mimeType: string,
+): Promise<Response<Record<never, never>>> {
+  try {
+    await setResume({ base64, filename, mimeType });
+    debug("SAVE_RESUME stored:", filename);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Google OAuth handler
 // ---------------------------------------------------------------------------
 
@@ -333,6 +364,14 @@ chrome.runtime.onMessage.addListener(
 
           case "SAVE_PROFILE":
             sendResponse(await handleSaveProfile(msg.markdown));
+            break;
+
+          case "GET_RESUME":
+            sendResponse(await handleGetResume());
+            break;
+
+          case "SAVE_RESUME":
+            sendResponse(await handleSaveResume(msg.base64, msg.filename, msg.mimeType));
             break;
 
           case "GET_SETTINGS":

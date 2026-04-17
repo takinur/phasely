@@ -7,7 +7,7 @@
  *   - No raw encryption key material is ever persisted to storage.
  */
 
-import type { ExtensionSettings, Profile, StoredData } from "@/lib/types";
+import type { ExtensionSettings, Profile, StoredData, StoredResume } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
 // Chrome storage promise wrappers
@@ -68,6 +68,7 @@ function storageClear(): Promise<void> {
 
 const KEY_KDF_SALT = "__kdf_salt";
 const KEY_PROFILE = "profile";
+const KEY_RESUME = "resume";
 const KEY_SETTINGS = "settings";
 const KDF_ITERATIONS = 310_000;
 
@@ -276,6 +277,48 @@ export async function getSettings(
 }
 
 // ---------------------------------------------------------------------------
+// Resume helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Encrypt and persist a resume blob.
+ * The caller must convert the File/Blob to base64 before calling.
+ */
+export async function setResume(
+  resume: StoredResume,
+  passphrase?: string,
+): Promise<void> {
+  try {
+    const encrypted = await encryptData(JSON.stringify(resume), passphrase);
+    await storageSet(KEY_RESUME, encrypted);
+  } catch (err) {
+    console.error("[Phasely] setResume failed:", err);
+    throw err;
+  }
+}
+
+/**
+ * Retrieve and decrypt the stored resume.
+ * Returns null if no resume has been uploaded yet.
+ */
+export async function getResume(passphrase?: string): Promise<StoredResume | null> {
+  try {
+    const stored = await storageGet<{ iv: string; data: string }>(KEY_RESUME);
+    if (stored === null) return null;
+    const json = await decryptData(stored.iv, stored.data, passphrase);
+    const parsed = parseJsonSafe(json);
+    if (!isStoredResume(parsed)) {
+      console.error("[Phasely] getResume: invalid shape in storage");
+      return null;
+    }
+    return parsed;
+  } catch (err) {
+    console.error("[Phasely] getResume failed:", err);
+    throw err;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Generic typed get / set — keyed on StoredData
 // ---------------------------------------------------------------------------
 
@@ -413,6 +456,15 @@ function isProfile(value: unknown): value is Profile {
     value.education.every((item) => isEducation(item)) &&
     typeof value.referencesAvailable === "boolean" &&
     typeof value.rawMarkdown === "string"
+  );
+}
+
+function isStoredResume(value: unknown): value is StoredResume {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.base64 === "string" &&
+    typeof value.filename === "string" &&
+    typeof value.mimeType === "string"
   );
 }
 
