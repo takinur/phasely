@@ -2,11 +2,9 @@
  * storage.ts — AES-GCM encrypted chrome.storage helpers
  *
  * Key lifecycle:
- *   - On first use, generate a random AES-GCM-256 key.
- *   - Export as JWK and persist to chrome.storage.local under __enc_key.
- *   - On subsequent calls, import from storage.
- *   - No module-level key cache — MV3 service workers have no guaranteed
- *     persistent module state, so we always go through storage.
+ *   - On first use, create and persist a random KDF salt.
+ *   - Derive an AES-GCM-256 key on demand using PBKDF2.
+ *   - No raw encryption key material is ever persisted to storage.
  */
 
 import type { ExtensionSettings, Profile } from "@/lib/types";
@@ -68,47 +66,42 @@ function storageClear(): Promise<void> {
 // Internal storage keys
 // ---------------------------------------------------------------------------
 
-const KEY_ENC_KEY = "__enc_key";
+const KEY_KDF_SALT = "__kdf_salt";
 const KEY_PROFILE = "profile";
 const KEY_SETTINGS = "settings";
+const KDF_ITERATIONS = 310_000;
 
 // ---------------------------------------------------------------------------
 // Key derivation / management
 // ---------------------------------------------------------------------------
 
 /**
- * Retrieve or generate the device-bound AES-GCM-256 encryption key.
- * Never cached in memory — always round-trips through chrome.storage so
- * the service worker can be terminated and restarted safely.
+ * Derive a device-bound AES-GCM-256 key using PBKDF2.
+ * No raw key is stored; only a random salt is persisted.
  */
-export async function getKey(): Promise<CryptoKey> {
+export async function getKey(passphrase?: string): Promise<CryptoKey> {
   try {
-    const stored = await storageGet<JsonWebKey>(KEY_ENC_KEY);
+    const encoder = new TextEncoder();
+    const salt = await getOrCreateKdfSalt();
+    const normalizedPassphrase = passphrase?.trim() ?? "";
+    const secret = `${chrome.runtime.id}:${normalizedPassphrase}`;
 
-    if (stored !== null) {
-      return await crypto.subtle.importKey(
-        "jwk",
-        stored,
-        { name: "AES-GCM", length: 256 },
-        false, // not extractable after import — only the stored JWK is the source of truth
-        ["encrypt", "decrypt"],
-      );
-    }
-
-    // First use — generate a fresh key
-    const key = await crypto.subtle.generateKey(
-      { name: "AES-GCM", length: 256 },
-      true, // must be extractable so we can export it for storage
-      ["encrypt", "decrypt"],
+    const keyMaterial = await crypto.subtle.importKey(
+      "raw",
+      encoder.encode(secret),
+      { name: "PBKDF2" },
+      false,
+      ["deriveKey"],
     );
 
-    const jwk = await crypto.subtle.exportKey("jwk", key);
-    await storageSet(KEY_ENC_KEY, jwk);
-
-    // Re-import as non-extractable for actual use
-    return await crypto.subtle.importKey(
-      "jwk",
-      jwk,
+    return await crypto.subtle.deriveKey(
+      {
+        name: "PBKDF2",
+        salt,
+        iterations: KDF_ITERATIONS,
+        hash: "SHA-256",
+      },
+      keyMaterial,
       { name: "AES-GCM", length: 256 },
       false,
       ["encrypt", "decrypt"],
@@ -130,9 +123,10 @@ export async function getKey(): Promise<CryptoKey> {
  */
 export async function encryptData(
   plaintext: string,
+  passphrase?: string,
 ): Promise<{ iv: string; data: string }> {
   try {
-    const key = await getKey();
+    const key = await getKey(passphrase);
     const encoder = new TextEncoder();
     const iv = crypto.getRandomValues(new Uint8Array(12)).slice();
 
@@ -155,9 +149,13 @@ export async function encryptData(
 /**
  * Decrypt a base64 iv + ciphertext pair produced by encryptData.
  */
-export async function decryptData(iv: string, data: string): Promise<string> {
+export async function decryptData(
+  iv: string,
+  data: string,
+  passphrase?: string,
+): Promise<string> {
   try {
-    const key = await getKey();
+    const key = await getKey(passphrase);
     const decoder = new TextDecoder();
 
     const plainBuffer = await crypto.subtle.decrypt(
@@ -181,9 +179,12 @@ export async function decryptData(iv: string, data: string): Promise<string> {
  * Encrypt and persist the profile JSON string to chrome.storage.local.
  * The caller is responsible for serialising Profile → JSON before calling.
  */
-export async function setProfileData(profileJson: string): Promise<void> {
+export async function setProfileData(
+  profileJson: string,
+  passphrase?: string,
+): Promise<void> {
   try {
-    const encrypted = await encryptData(profileJson);
+    const encrypted = await encryptData(profileJson, passphrase);
     await storageSet(KEY_PROFILE, encrypted);
   } catch (err) {
     console.error("[Phasely] setProfileData failed:", err);
@@ -196,11 +197,11 @@ export async function setProfileData(profileJson: string): Promise<void> {
  * Returns null if no profile has been stored yet.
  * The caller is responsible for deserialising JSON → Profile.
  */
-export async function getProfileData(): Promise<string | null> {
+export async function getProfileData(passphrase?: string): Promise<string | null> {
   try {
     const stored = await storageGet<{ iv: string; data: string }>(KEY_PROFILE);
     if (stored === null) return null;
-    return await decryptData(stored.iv, stored.data);
+    return await decryptData(stored.iv, stored.data, passphrase);
   } catch (err) {
     console.error("[Phasely] getProfileData failed:", err);
     throw err;
@@ -210,17 +211,25 @@ export async function getProfileData(): Promise<string | null> {
 /**
  * Convenience wrapper: encrypt and store a typed Profile object.
  */
-export async function setProfile(profile: Profile): Promise<void> {
-  await setProfileData(JSON.stringify(profile));
+export async function setProfile(
+  profile: Profile,
+  passphrase?: string,
+): Promise<void> {
+  await setProfileData(JSON.stringify(profile), passphrase);
 }
 
 /**
  * Convenience wrapper: retrieve and deserialise a typed Profile object.
  */
-export async function getProfile(): Promise<Profile | null> {
-  const json = await getProfileData();
+export async function getProfile(passphrase?: string): Promise<Profile | null> {
+  const json = await getProfileData(passphrase);
   if (json === null) return null;
-  return JSON.parse(json) as Profile;
+  const parsed = parseJsonSafe(json);
+  if (!isProfile(parsed)) {
+    console.error("[Phasely] getProfile invalid profile shape in storage");
+    return null;
+  }
+  return parsed;
 }
 
 // ---------------------------------------------------------------------------
@@ -230,9 +239,12 @@ export async function getProfile(): Promise<Profile | null> {
 /**
  * Encrypt and persist a settings object.
  */
-export async function setSettings(settings: ExtensionSettings): Promise<void> {
+export async function setSettings(
+  settings: ExtensionSettings,
+  passphrase?: string,
+): Promise<void> {
   try {
-    const encrypted = await encryptData(JSON.stringify(settings));
+    const encrypted = await encryptData(JSON.stringify(settings), passphrase);
     await storageSet(KEY_SETTINGS, encrypted);
   } catch (err) {
     console.error("[Phasely] setSettings failed:", err);
@@ -244,12 +256,19 @@ export async function setSettings(settings: ExtensionSettings): Promise<void> {
  * Retrieve and decrypt the settings object.
  * Returns null if settings have never been saved.
  */
-export async function getSettings(): Promise<ExtensionSettings | null> {
+export async function getSettings(
+  passphrase?: string,
+): Promise<ExtensionSettings | null> {
   try {
     const stored = await storageGet<{ iv: string; data: string }>(KEY_SETTINGS);
     if (stored === null) return null;
-    const json = await decryptData(stored.iv, stored.data);
-    return JSON.parse(json) as ExtensionSettings;
+    const json = await decryptData(stored.iv, stored.data, passphrase);
+    const parsed = parseJsonSafe(json);
+    if (!isExtensionSettings(parsed)) {
+      console.error("[Phasely] getSettings invalid settings shape in storage");
+      return null;
+    }
+    return parsed;
   } catch (err) {
     console.error("[Phasely] getSettings failed:", err);
     throw err;
@@ -293,4 +312,86 @@ function base64ToBuffer(base64: string): Uint8Array<ArrayBuffer> {
     buffer[i] = binary.charCodeAt(i);
   }
   return buffer.slice(); // slice() narrows buffer type to ArrayBuffer
+}
+
+async function getOrCreateKdfSalt(): Promise<Uint8Array<ArrayBuffer>> {
+  const existingSalt = await storageGet<string>(KEY_KDF_SALT);
+  if (typeof existingSalt === "string" && existingSalt.length > 0) {
+    return base64ToBuffer(existingSalt);
+  }
+
+  const salt = crypto.getRandomValues(new Uint8Array(16)).slice();
+  await storageSet(KEY_KDF_SALT, bufferToBase64(salt));
+  return salt;
+}
+
+function parseJsonSafe(json: string): unknown {
+  try {
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+function isEducation(value: unknown): value is { degree: string; institution: string; year: number } {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.degree === "string" &&
+    typeof value.institution === "string" &&
+    typeof value.year === "number"
+  );
+}
+
+function isProfile(value: unknown): value is Profile {
+  if (!isRecord(value)) return false;
+
+  return (
+    typeof value.firstName === "string" &&
+    typeof value.lastName === "string" &&
+    typeof value.email === "string" &&
+    typeof value.phone === "string" &&
+    typeof value.location === "string" &&
+    (value.linkedin === undefined || typeof value.linkedin === "string") &&
+    (value.github === undefined || typeof value.github === "string") &&
+    (value.portfolio === undefined || typeof value.portfolio === "string") &&
+    typeof value.workAuth === "string" &&
+    typeof value.noticePeriod === "string" &&
+    typeof value.salaryExpectation === "string" &&
+    typeof value.willingToRelocate === "boolean" &&
+    typeof value.remotePreference === "string" &&
+    typeof value.currentTitle === "string" &&
+    typeof value.currentCompany === "string" &&
+    typeof value.yearsExperience === "number" &&
+    isStringArray(value.skills) &&
+    Array.isArray(value.education) &&
+    value.education.every((item) => isEducation(item)) &&
+    typeof value.referencesAvailable === "boolean" &&
+    typeof value.rawMarkdown === "string"
+  );
+}
+
+function isExtensionSettings(value: unknown): value is ExtensionSettings {
+  if (!isRecord(value)) return false;
+
+  const isGeminiModel =
+    value.geminiModel === "gemini-1.5-flash" ||
+    value.geminiModel === "gemini-1.5-pro";
+  const isProvider =
+    value.preferredAiProvider === "gemini" || value.preferredAiProvider === "claude";
+
+  return (
+    isGeminiModel &&
+    typeof value.autoSubmit === "boolean" &&
+    typeof value.confirmBeforeSubmit === "boolean" &&
+    (value.claudeApiKey === undefined || typeof value.claudeApiKey === "string") &&
+    isProvider
+  );
 }

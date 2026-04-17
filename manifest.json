@@ -1,20 +1,21 @@
 {
     "manifest_version": 3,
-    "name": "My Extension",
-    "version": "1.0.0",
-    "description": "A Chrome extension built with Vite and CRXJS",
-    "permissions": ["activeTab", "scripting"],
+    "name": "Phasely",
+    "version": "0.1.0",
+    "description": "Auto-fill job applications from your profile in one click.",
+    "permissions": ["activeTab", "scripting", "storage"],
     "action": {
         "default_popup": "src/popup.html",
-        "default_title": "My Extension"
+        "default_title": "Phasely"
     },
     "background": {
         "service_worker": "src/background.ts"
     },
     "content_scripts": [
         {
-            "matches": ["<all_urls>"],
-            "js": ["src/content.ts"]
+            "matches": ["https://*/*", "http://*/*"],
+            "js": ["src/content.ts"],
+            "run_at": "document_idle"
         }
     ],
     "icons": {
