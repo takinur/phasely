@@ -702,6 +702,44 @@ function GoogleIcon() {
 }
 
 // ---------------------------------------------------------------------------
+// Premium section (UI only)
+// ---------------------------------------------------------------------------
+
+function PremiumSection() {
+  const upcoming = [
+    "Claude API integration",
+    "GPT API integration",
+    "Tailored resume generation",
+    "Multiple profiles",
+    "+2 more upcoming features",
+  ];
+
+  return (
+    <section className="rounded-lg border border-amber-200 bg-gradient-to-br from-amber-50 to-white p-6">
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <div>
+          <h2 className="text-base font-semibold text-amber-900">Premium features (Upcoming)</h2>
+          <p className="text-sm text-amber-800 mt-0.5">
+            PAID plan (one-time payment) — UI preview only for now.
+          </p>
+        </div>
+        <span className="rounded-full bg-amber-100 border border-amber-300 px-2.5 py-1 text-xs font-semibold text-amber-800">
+          PAID
+        </span>
+      </div>
+
+      <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm text-gray-700">
+        {upcoming.map((feature) => (
+          <li key={feature} className="rounded-md border border-amber-100 bg-white px-3 py-2">
+            {feature}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Danger zone
 // ---------------------------------------------------------------------------
 
@@ -948,6 +986,8 @@ export function Options() {
         />
 
         <AuthSection onAuthed={handleAuthed} />
+
+        <PremiumSection />
 
         <DangerZone onWiped={handleWiped} />
 
