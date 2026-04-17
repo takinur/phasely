@@ -223,14 +223,14 @@ function collectElements(root: Document | ShadowRoot | Element): HTMLElement[] {
     node = walker.nextNode()
   }
 
-  // Now recurse into any shadow roots encountered in the entire subtree
-  const allElements = (root as Element | Document).querySelectorAll
-    ? Array.from((root as Element | Document).querySelectorAll("*"))
-    : []
+  // Now recurse into any shadow roots encountered in the entire subtree.
+  // Document, ShadowRoot, and Element all have querySelectorAll.
+  const allElements = Array.from(root.querySelectorAll("*"))
 
   for (const el of allElements) {
-    if ((el as HTMLElement).shadowRoot) {
-      const shadowResults = collectElements((el as HTMLElement).shadowRoot as ShadowRoot)
+    const shadow = (el as HTMLElement).shadowRoot
+    if (shadow) {
+      const shadowResults = collectElements(shadow)
       results.push(...shadowResults)
     }
   }

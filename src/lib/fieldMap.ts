@@ -1,5 +1,5 @@
 // src/lib/fieldMap.ts — canonical mapping
-export const FIELD_MAP: Record<string, string[]> = {
+const RAW_FIELD_MAP: Record<string, string[]> = {
   // Personal
   "firstName":         ["first_name", "fname", "given-name", "given_name", "givenname", "firstname", "first-name", "first", "legal_first_name", "candidate_first_name", "applicant_first_name", "firstName"],
   "lastName":          ["last_name", "lname", "family-name", "family_name", "familyname", "lastname", "last-name", "surname", "last", "legal_last_name", "candidate_last_name", "applicant_last_name", "lastName"],
@@ -26,3 +26,34 @@ export const FIELD_MAP: Record<string, string[]> = {
   "coverLetter":       ["cover_letter", "coverLetter", "cover_letter_text", "coverletter", "coverletter_text", "cover_letter_content", "covering_letter", "motivation", "motivation_letter", "why_us", "application_message", "letter"],
   "additionalInfo":    ["additional_information", "additionalInformation", "additional_info", "anything_else", "other_information", "other_info", "comments", "comment", "notes", "note", "notes_comments", "personal_statement", "summary", "about_you"],
 }
+
+function normaliseAlias(alias: string): string {
+  return alias.trim().toLowerCase()
+}
+
+function buildCanonicalFieldMap(
+  source: Record<string, string[]>,
+): Record<string, string[]> {
+  const result: Record<string, string[]> = {}
+
+  for (const [key, aliases] of Object.entries(source)) {
+    const seen = new Set<string>()
+    const deduped: string[] = []
+
+    for (const rawAlias of aliases) {
+      const alias = normaliseAlias(rawAlias)
+      if (!alias || seen.has(alias)) continue
+
+      seen.add(alias)
+      deduped.push(alias)
+    }
+
+    result[key] = deduped
+  }
+
+  return result
+}
+
+export const FIELD_MAP: Record<string, string[]> = buildCanonicalFieldMap(
+  RAW_FIELD_MAP,
+)
