@@ -52,7 +52,6 @@ export interface ExtensionSettings {
   autoSubmit: boolean
   confirmBeforeSubmit: boolean
   claudeApiKey?: string       // dormant in v1, active in next feature
-  preferredAiProvider: "gemini" | "claude"  // "gemini" locked in v1
 }
 
 export interface StoredResume {

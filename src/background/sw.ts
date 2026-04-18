@@ -9,11 +9,11 @@
  *   - All chrome.* calls are wrapped in try/catch with [Phasely] prefix logging.
  */
 
-import { getProfile, setProfile, getResume, setResume, getSettings, setSettings, setGeminiToken, getGeminiToken, wipeAll } from "@/lib/storage";
+import { getProfile, setProfile, getResume, setResume, getSettings, setSettings, setGeminiToken, getGeminiToken, wipeAll, getPresets, setPresets } from "@/lib/storage";
 import { DEFAULT_SETTINGS } from "@/lib/defaults";
 import type { StoredResume } from "@/lib/types";
 import { parseProfile, ProfileParseError } from "@/lib/profile";
-import type { DetectedField, ExtensionSettings, JobContext, Profile } from "@/lib/types";
+import type { DetectedField, ExtensionSettings, JobContext, Profile, ProfilePreset } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
 // Debug utility (no-op in production)
@@ -43,6 +43,8 @@ export type Message =
   | { type: "SAVE_SETTINGS"; settings: ExtensionSettings }
   | { type: "AUTH_GOOGLE" }
   | { type: "GET_GEMINI_MODELS" }
+  | { type: "GET_PRESETS" }
+  | { type: "SAVE_PRESETS"; presets: ProfilePreset[] }
   | { type: "WIPE_DATA" };
 
 // ---------------------------------------------------------------------------
@@ -423,6 +425,31 @@ async function handleAuthGoogle(): Promise<Response<{ token: string }>> {
 }
 
 // ---------------------------------------------------------------------------
+// Preset handlers
+// ---------------------------------------------------------------------------
+
+async function handleGetPresets(): Promise<Response<{ presets: ProfilePreset[] }>> {
+  try {
+    const presets = await getPresets();
+    return { ok: true, presets };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
+async function handleSavePresets(
+  presets: ProfilePreset[],
+): Promise<Response<{ presets: ProfilePreset[] }>> {
+  try {
+    await setPresets(presets);
+    debug("SAVE_PRESETS stored", presets.length, "presets");
+    return { ok: true, presets };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Message router
 // ---------------------------------------------------------------------------
 
@@ -512,6 +539,14 @@ chrome.runtime.onMessage.addListener(
 
           case "GET_GEMINI_MODELS":
             sendResponse(await handleGetGeminiModels());
+            break;
+
+          case "GET_PRESETS":
+            sendResponse(await handleGetPresets());
+            break;
+
+          case "SAVE_PRESETS":
+            sendResponse(await handleSavePresets(msg.presets));
             break;
 
           case "WIPE_DATA":

@@ -32,9 +32,19 @@ type MsgPayload =
   | { type: "GET_GEMINI_MODELS" }
   | { type: "WIPE_DATA" };
 
-function sendMsg<T = unknown>(payload: MsgPayload): Promise<T> {
+function sendMsg<T = unknown>(payload: MsgPayload, timeoutMs = 20_000): Promise<T> {
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      reject(new Error("Request timed out — please try again"));
+    }, timeoutMs);
+
     chrome.runtime.sendMessage(payload, (response: T) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
       if (chrome.runtime.lastError) {
         reject(new Error(chrome.runtime.lastError.message));
       } else {
@@ -841,27 +851,21 @@ function GoogleIcon() {
 // Premium section (UI only)
 // ---------------------------------------------------------------------------
 
-function PremiumSection() {
+function UpcomingSection() {
   const upcoming = [
     "Claude API integration",
     "GPT API integration",
     "Tailored resume generation",
     "Multiple profiles",
-    "+2 more upcoming features",
   ];
 
   return (
     <section className="rounded-lg border border-amber-200 bg-gradient-to-br from-amber-50 to-white p-6">
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <div>
-          <h2 className="text-base font-semibold text-amber-900">Premium features (Upcoming)</h2>
-          <p className="text-sm text-amber-800 mt-0.5">
-            PAID plan (one-time payment) — UI preview only for now.
-          </p>
-        </div>
-        <span className="rounded-full bg-amber-100 border border-amber-300 px-2.5 py-1 text-xs font-semibold text-amber-800">
-          PAID
-        </span>
+      <div className="mb-4">
+        <h2 className="text-base font-semibold text-amber-900">Upcoming features</h2>
+        <p className="text-sm text-amber-800 mt-0.5">
+          Features in the pipeline — not yet available.
+        </p>
       </div>
 
       <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm text-gray-700">
@@ -988,7 +992,6 @@ export function Options() {
   const [resumeFilename, setResumeFilename] = useState<string | null>(null);
   const [settings, setSettings] = useState<ExtensionSettings>(DEFAULT_SETTINGS);
   const [oauthEnabled, setOauthEnabled] = useState(false);
-  const [settingsResetKey, setSettingsResetKey] = useState(0);
   const [modelsRefreshKey, setModelsRefreshKey] = useState(0);
   const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
     try {
@@ -1034,12 +1037,7 @@ export function Options() {
   }, [isDarkMode]);
 
   const handleWiped = useCallback(() => {
-    setProfile(null);
-    setResumeFilename(null);
-    setSettings(DEFAULT_SETTINGS);
-    setOauthEnabled(false);
-    setSettingsResetKey((k) => k + 1);
-    setModelsRefreshKey((k) => k + 1);
+    window.location.reload();
   }, []);
 
   const handleAuthed = useCallback(() => {
@@ -1139,14 +1137,13 @@ export function Options() {
         <AuthSection oauthEnabled={oauthEnabled} onAuthed={handleAuthed} />
 
         <SettingsSection
-          key={settingsResetKey}
           settings={settings}
           onSettingsSaved={setSettings}
           modelsRefreshKey={modelsRefreshKey}
           onOauthEnabledChange={setOauthEnabled}
         />
 
-        <PremiumSection />
+        <UpcomingSection />
 
         <DangerZone onWiped={handleWiped} />
 

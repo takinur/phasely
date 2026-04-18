@@ -8,5 +8,4 @@ export const DEFAULT_SETTINGS: ExtensionSettings = {
   geminiModel: "gemini-1.5-flash",
   autoSubmit: false,
   confirmBeforeSubmit: true,
-  preferredAiProvider: "gemini",
 };
