@@ -2,10 +2,9 @@
  * Popup.tsx — Phasely extension popup
  *
  * Flow:
- *   1. Load profile, resume, settings, presets from SW on mount
- *   2. User selects a preset chip (Default = base profile, or a named override)
- *   3. Fill button merges the selected preset into the profile and calls FILL_ALL
- *   4. Fill & Submit also triggers SUBMIT after a successful fill
+ *   1. Load profile, resume, and settings from SW on mount
+ *   2. Fill sends the profile to the content script via FILL_ALL
+ *   3. Fill & Submit triggers FILL_ALL then SUBMIT in sequence
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -199,7 +198,7 @@ export function Popup() {
         {/* No resume */}
         {hasProfile && !hasResume && (
           <div className="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
-            <span className="font-semibold">Resume required.</span> Upload your resume in{" "}
+            <span className="font-semibold">No resume uploaded.</span> Add one in{" "}
             <a
               href={chrome.runtime.getURL("src/options.html")}
               target="_blank"
@@ -208,7 +207,7 @@ export function Popup() {
             >
               Settings
             </a>{" "}
-            before filling.
+            — Phasely will attach it to file-upload fields automatically.
           </div>
         )}
 

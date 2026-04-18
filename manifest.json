@@ -2,7 +2,7 @@
     "manifest_version": 3,
     "name": "Phasely",
     "version": "1.0.2",
-    "description": "Auto-fill job applications from your profile in one click.",
+    "description": "Stop re-typing your CV into job forms. Phasely fills applications in one click — free, open-source, and fully private.",
     "permissions": ["activeTab", "tabs", "scripting", "storage", "identity"],
     "host_permissions": ["https://generativelanguage.googleapis.com/*"],
     "oauth2": {
