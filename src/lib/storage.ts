@@ -319,6 +319,36 @@ export async function getResume(passphrase?: string): Promise<StoredResume | nul
 }
 
 // ---------------------------------------------------------------------------
+// Preset helpers
+// ---------------------------------------------------------------------------
+
+const KEY_PRESETS = "presets";
+
+export async function getPresets(): Promise<ProfilePreset[]> {
+  try {
+    const stored = await storageGet<{ iv: string; data: string }>(KEY_PRESETS);
+    if (stored === null) return [];
+    const json = await decryptData(stored.iv, stored.data);
+    const parsed = parseJsonSafe(json);
+    if (!isProfilePresetArray(parsed)) return [];
+    return parsed;
+  } catch (err) {
+    console.error("[Phasely] getPresets failed:", err);
+    return [];
+  }
+}
+
+export async function setPresets(presets: ProfilePreset[]): Promise<void> {
+  try {
+    const encrypted = await encryptData(JSON.stringify(presets));
+    await storageSet(KEY_PRESETS, encrypted);
+  } catch (err) {
+    console.error("[Phasely] setPresets failed:", err);
+    throw err;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Gemini token helpers
 // ---------------------------------------------------------------------------
 
@@ -510,18 +540,34 @@ function isStoredResume(value: unknown): value is StoredResume {
   );
 }
 
+function isProfilePreset(value: unknown): value is ProfilePreset {
+  if (!isRecord(value)) return false;
+  if (typeof value.id !== "string") return false;
+  if (typeof value.name !== "string") return false;
+  if (!isRecord(value.overrides)) return false;
+  const o = value.overrides;
+  return (
+    (o.currentTitle === undefined || typeof o.currentTitle === "string") &&
+    (o.salaryExpectation === undefined || typeof o.salaryExpectation === "string") &&
+    (o.noticePeriod === undefined || typeof o.noticePeriod === "string") &&
+    (o.remotePreference === undefined || typeof o.remotePreference === "string") &&
+    (o.workAuth === undefined || typeof o.workAuth === "string") &&
+    (o.willingToRelocate === undefined || typeof o.willingToRelocate === "boolean")
+  );
+}
+
+function isProfilePresetArray(value: unknown): value is ProfilePreset[] {
+  return Array.isArray(value) && value.every(isProfilePreset);
+}
+
 function isExtensionSettings(value: unknown): value is ExtensionSettings {
   if (!isRecord(value)) return false;
 
-  const isGeminiModel = typeof value.geminiModel === "string" && value.geminiModel.length > 0;
-  const isProvider =
-    value.preferredAiProvider === "gemini" || value.preferredAiProvider === "claude";
-
   return (
-    isGeminiModel &&
+    typeof value.geminiModel === "string" &&
+    value.geminiModel.length > 0 &&
     typeof value.autoSubmit === "boolean" &&
     typeof value.confirmBeforeSubmit === "boolean" &&
-    (value.claudeApiKey === undefined || typeof value.claudeApiKey === "string") &&
-    isProvider
+    (value.claudeApiKey === undefined || typeof value.claudeApiKey === "string")
   );
 }

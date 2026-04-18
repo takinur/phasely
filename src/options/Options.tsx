@@ -32,9 +32,19 @@ type MsgPayload =
   | { type: "GET_GEMINI_MODELS" }
   | { type: "WIPE_DATA" };
 
-function sendMsg<T = unknown>(payload: MsgPayload): Promise<T> {
+function sendMsg<T = unknown>(payload: MsgPayload, timeoutMs = 20_000): Promise<T> {
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      reject(new Error("Request timed out — please try again"));
+    }, timeoutMs);
+
     chrome.runtime.sendMessage(payload, (response: T) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
       if (chrome.runtime.lastError) {
         reject(new Error(chrome.runtime.lastError.message));
       } else {
@@ -232,7 +242,7 @@ function ProfileSection({
     <section className="rounded-lg border border-gray-200 p-6">
       <SectionHeader
         title="Profile"
-        subtitle="Edit the template with your details and click Save. Phasely uses it to autofill every application field."
+        subtitle="Fill in the fields below and click Save. Phasely uses this to fill every application — no re-typing required."
       />
 
       {/* Current profile summary */}
@@ -285,11 +295,11 @@ function ProfileSection({
 
       {/* AI generation hint */}
       <div className="mb-4 rounded-md bg-indigo-50 border border-indigo-100 px-4 py-3 text-xs text-indigo-800">
-        <span className="font-semibold">Tip:</span> Upload your CV or resume to ChatGPT or Gemini and ask:{" "}
+        <span className="font-semibold">Don't want to write this by hand?</span> Drop your CV into ChatGPT or Gemini and ask:{" "}
         <span className="italic">
-          "Convert this into a Phasely profile using the YAML front-matter markdown format shown below, keeping all the same field names."
+          "Convert this into a Phasely profile using YAML front-matter. Required: firstName, lastName, email. Include phone, location, currentTitle, currentCompany, yearsExperience, skills, education, workAuth, noticePeriod, salaryExpectation, willingToRelocate, remotePreference if present."
         </span>{" "}
-        Then paste the result into the editor and click Save.
+        Then paste the result here and click Save.
       </div>
 
       {/* Paste area */}
@@ -325,7 +335,7 @@ function ProfileSection({
           <svg className="w-3 h-3 shrink-0" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
             <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
           </svg>
-          Phasely strips any AI instructions from your profile before saving and before sending to Gemini.
+          Prompt injection patterns are automatically stripped before saving.
         </p>
 
         {saveError && <Alert type="error">{saveError}</Alert>}
@@ -503,7 +513,7 @@ function ResumeSection({
     <section className="rounded-lg border border-gray-200 p-6">
       <SectionHeader
         title="Resume"
-        subtitle="Upload your resume PDF. It will be stored encrypted and attached to file-upload fields automatically."
+        subtitle="Upload your resume once. Phasely attaches it to file-upload fields automatically — no dragging and dropping every time."
       />
 
       <div className="space-y-3">
@@ -643,7 +653,7 @@ function SettingsSection({
     <section className="rounded-lg border border-gray-200 p-6">
       <SectionHeader
         title="Extension Settings"
-        subtitle="Control submit confirmation and AI model selection."
+        subtitle="Control how Phasely fills and submits applications."
       />
 
       <div className="space-y-5">
@@ -765,8 +775,8 @@ function AuthSection({
         <div>
           <h2 className="text-base font-semibold text-gray-900">Google Account (AI features)</h2>
           <p className="text-sm text-gray-500 mt-0.5">
-            Sign in with Google to enable AI-written cover letters and open questions.
-            Your token never leaves your browser.
+            Connect your Google account to unlock AI-generated cover letters and open questions.
+            Calls go directly to Google — no Phasely servers involved.
           </p>
         </div>
         {oauthEnabled && (
@@ -807,7 +817,7 @@ function AuthSection({
         </button>
 
         <p className="text-xs text-gray-400">
-          Only the Gemini AI scope is requested. No access to Gmail or Drive.
+          Only the Gemini AI scope is requested — no access to Gmail, Drive, or any other Google service.
         </p>
       </div>
     </section>
@@ -841,27 +851,21 @@ function GoogleIcon() {
 // Premium section (UI only)
 // ---------------------------------------------------------------------------
 
-function PremiumSection() {
+function UpcomingSection() {
   const upcoming = [
     "Claude API integration",
     "GPT API integration",
     "Tailored resume generation",
     "Multiple profiles",
-    "+2 more upcoming features",
   ];
 
   return (
     <section className="rounded-lg border border-amber-200 bg-gradient-to-br from-amber-50 to-white p-6">
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <div>
-          <h2 className="text-base font-semibold text-amber-900">Premium features (Upcoming)</h2>
-          <p className="text-sm text-amber-800 mt-0.5">
-            PAID plan (one-time payment) — UI preview only for now.
-          </p>
-        </div>
-        <span className="rounded-full bg-amber-100 border border-amber-300 px-2.5 py-1 text-xs font-semibold text-amber-800">
-          PAID
-        </span>
+      <div className="mb-4">
+        <h2 className="text-base font-semibold text-amber-900">Coming up</h2>
+        <p className="text-sm text-amber-800 mt-0.5">
+          Things being worked on — not available yet.
+        </p>
       </div>
 
       <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm text-gray-700">
@@ -923,17 +927,17 @@ function DangerZone({ onWiped }: { onWiped: () => void }) {
     <section className="rounded-lg border border-red-200 p-6">
       <SectionHeader
         title="Danger Zone"
-        subtitle="Permanently delete all stored data including your profile, encryption key, and settings. This cannot be undone."
+        subtitle="Permanently delete everything — profile, resume, encryption key, settings. Cannot be undone. Export your profile first if you want to keep it."
       />
 
       <div className="space-y-3">
         {wipeError && <Alert type="error">{wipeError}</Alert>}
-        {wipeSuccess && <Alert type="success">Cleanslate</Alert>}
+        {wipeSuccess && <Alert type="success">All data wiped. Reloading…</Alert>}
 
         {confirming && (
           <Alert type="warning">
-            This will permanently delete all Phasely data including the encryption key.
-            Previously stored data will be unrecoverable. Click again to confirm.
+            This will permanently delete all Phasely data including the encryption key. There is no recovery.
+            Export your profile first if you need it. Click again to confirm.
           </Alert>
         )}
 
@@ -972,7 +976,7 @@ function DangerZone({ onWiped }: { onWiped: () => void }) {
         </div>
 
         <p className="text-xs text-gray-400">
-          GDPR: Cleaning browser data cleans up everything and there’s no way to recover it, so make sure to export your profile if you want to keep using Phasely after the wipe.
+          Because everything is local and encrypted, wiping is final — there is no server copy to restore from.
         </p>
       </div>
     </section>
@@ -988,7 +992,6 @@ export function Options() {
   const [resumeFilename, setResumeFilename] = useState<string | null>(null);
   const [settings, setSettings] = useState<ExtensionSettings>(DEFAULT_SETTINGS);
   const [oauthEnabled, setOauthEnabled] = useState(false);
-  const [settingsResetKey, setSettingsResetKey] = useState(0);
   const [modelsRefreshKey, setModelsRefreshKey] = useState(0);
   const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
     try {
@@ -1034,12 +1037,7 @@ export function Options() {
   }, [isDarkMode]);
 
   const handleWiped = useCallback(() => {
-    setProfile(null);
-    setResumeFilename(null);
-    setSettings(DEFAULT_SETTINGS);
-    setOauthEnabled(false);
-    setSettingsResetKey((k) => k + 1);
-    setModelsRefreshKey((k) => k + 1);
+    window.location.reload();
   }, []);
 
   const handleAuthed = useCallback(() => {
@@ -1100,16 +1098,15 @@ export function Options() {
 
         {/* Introduction */}
         <div className="rounded-xl border border-indigo-100 bg-gradient-to-br from-indigo-50 to-white px-6 py-5 dark:bg-gray-800">
-          <h2 className="text-sm font-semibold text-indigo-900 mb-1.5">One profile. Every application.</h2>
+          <h2 className="text-sm font-semibold text-indigo-900 mb-1.5">Fill every form. Once.</h2>
           <p className="text-sm text-gray-600 leading-relaxed">
-            Describe yourself once in a simple markdown format, then let Phasely autofill any job application in a single click —
-            Workday, Greenhouse, Lever, iCIMS, and more. Your data is encrypted on your device and never sent to any Phasely server.
-            AI-written fields (cover letters, open questions) call Gemini directly from your browser using your Google account.
+            Write your profile once. Phasely handles the copy-paste — Workday, Greenhouse, Lever, iCIMS, and more,
+            all filled in one click. Everything stays encrypted on your device. No accounts. No servers. No nonsense.
           </p>
           <div className="mt-3 flex flex-wrap gap-3 text-xs text-gray-500">
             <span className="flex items-center gap-1">
               <svg className="w-3.5 h-3.5 text-green-500" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
-              AES-256 encrypted storage
+              Encrypted on-device
             </span>
             <span className="flex items-center gap-1">
               <svg className="w-3.5 h-3.5 text-green-500" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
@@ -1117,11 +1114,11 @@ export function Options() {
             </span>
             <span className="flex items-center gap-1">
               <svg className="w-3.5 h-3.5 text-green-500" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
-              No Phasely servers
+              No servers
             </span>
             <span className="flex items-center gap-1">
               <svg className="w-3.5 h-3.5 text-green-500" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
-              Prompt injection protection
+              Open source
             </span>
           </div>
         </div>
@@ -1139,19 +1136,18 @@ export function Options() {
         <AuthSection oauthEnabled={oauthEnabled} onAuthed={handleAuthed} />
 
         <SettingsSection
-          key={settingsResetKey}
           settings={settings}
           onSettingsSaved={setSettings}
           modelsRefreshKey={modelsRefreshKey}
           onOauthEnabledChange={setOauthEnabled}
         />
 
-        <PremiumSection />
+        <UpcomingSection />
 
         <DangerZone onWiped={handleWiped} />
 
         <p className="text-xs text-gray-400 text-center pb-4">
-          Phasely v1.0.2 — All data is encrypted locally. Zero telemetry. copyright © {new Date().getFullYear()} Phasely
+          Phasely v1.0.2 — open source · encrypted locally · zero telemetry
         </p>
       </main>
     </div>
