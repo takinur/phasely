@@ -1,73 +1,97 @@
-# React + TypeScript + Vite
+# Phasely
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+<p align="center">
+  <img src="src/assets/phasely-logo.svg" alt="Phasely logo" width="520" />
+</p>
 
-Currently, two official plugins are available:
+Phasely is a Chrome extension that autofills job application forms from a single encrypted markdown profile.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Why Phasely
 
-## React Compiler
+- One profile, reused across many job portals
+- Heuristic field detection with confidence scoring
+- One-click fill and optional submit flow
+- Local-first encrypted storage (AES-GCM)
+- Zero telemetry and no Phasely backend servers
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Features
 
-## Expanding the ESLint configuration
+- Import profile data from markdown front-matter
+- Detect input, textarea, select, file, and contenteditable fields
+- Fill all high-confidence fields or fill per-field
+- Resume file upload + auto-attach on file inputs
+- Job context extraction (title/company/location)
+- Settings for model choice and submit behavior
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+## Tech Stack
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+- React 18 + TypeScript
+- Vite + CRXJS (Manifest V3)
+- Tailwind CSS
+- Vitest + ESLint
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+## Project Structure
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```text
+src/
+  background/sw.ts        # Service worker message router
+  content/                # Field detection, filling, submit
+  lib/                    # Profile parsing, storage, mapping, shared types
+  popup/                  # Extension popup UI
+  options/                # Settings/options page UI
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## Local Development
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm ci
+npm run dev
 ```
+
+## Build
+
+```bash
+npm run build
+```
+
+Build output is generated in `dist/`.
+
+## Load in Chrome (User Testing)
+
+1. Run `npm run build`.
+2. Open `chrome://extensions`.
+3. Enable **Developer mode**.
+4. Click **Load unpacked** and select `dist/`.
+5. Open extension **Options**, import your `profile.md`, then test scan/fill/submit from the popup on target forms.
+
+## Quality Checks
+
+```bash
+npm run lint
+npm run test
+```
+
+## Release
+
+1. Ensure `manifest.json` and `package.json` version values match.
+2. Build on clean `main`: `npm ci && npm run build`.
+3. Zip the contents of `dist/` (not the folder itself).
+4. Upload ZIP to Chrome Web Store dashboard and submit for review.
+
+## Gemini OAuth Setup
+
+1. In Google Cloud Console:
+   1. Enable **Generative Language API**
+   2. Configure OAuth consent screen (External)
+   3. Add your account as a test user
+   4. Create OAuth client credentials for your extension flow
+2. Update `manifest.json`:
+   - Replace `oauth2.client_id` with your real client ID
+   - Keep scope: `https://www.googleapis.com/auth/generative-language`
+3. Reload extension in `chrome://extensions` and use **Sign in with Google** in Options.
+
+## Security
+
+- Profile and resume data are encrypted before persistence.
+- Content scripts do not perform direct remote API calls.
+- No analytics or telemetry is collected.

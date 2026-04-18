@@ -1,5 +1,80 @@
-import matter from "gray-matter";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import type { Education, Profile } from "@/lib/types";
+
+// ---------------------------------------------------------------------------
+// Minimal front-matter parser (replaces gray-matter, no Node.js deps)
+// ---------------------------------------------------------------------------
+
+/**
+ * Split a markdown string into its YAML front-matter data object and the
+ * remaining body text. Handles both LF and CRLF line endings.
+ *
+ * Returns `{ data: {}, content: markdown }` when no front-matter is found.
+ */
+function extractFrontMatter(markdown: string): { data: unknown; content: string } {
+  const match = markdown.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
+  if (!match) return { data: {}, content: markdown };
+  // Let YAML errors propagate — callers wrap with try/catch and surface a clear message.
+  const data = parseYaml(match[1]) as unknown;
+  const content = markdown.slice(match[0].length);
+  return { data, content };
+}
+
+// ---------------------------------------------------------------------------
+// Prompt-injection defence
+// ---------------------------------------------------------------------------
+
+/**
+ * Phrases that are strong signals of prompt-injection attempts embedded in
+ * user-supplied profile text. Each pattern is written without the `g` flag so
+ * it can be safely reused across multiple `.test()` calls.
+ */
+const INJECTION_PATTERNS: RegExp[] = [
+  /ignore\s+(all\s+)?(previous|prior|above|the\s+above|earlier)\s*(instructions?|rules?|prompts?|directives?|context)/i,
+  /disregard\s+(all\s+)?(previous|prior|above|earlier)\s*(instructions?|rules?|prompts?|directives?)/i,
+  /forget\s+(all\s+)?(previous|prior|above)\s*(instructions?|rules?|context|prompts?)/i,
+  /you\s+are\s+now\s+(a\s+|an\s+|the\s+)?\w/i,
+  /act\s+as\s+(if\s+(you\s+are\s+)?|a\s+|an\s+)/i,
+  /pretend\s+(you\s+are|to\s+be)\s+/i,
+  /your\s+new\s+(instructions?|task|role|purpose|goal|objective)/i,
+  /override\s+(previous|prior|all)?\s*(instructions?|rules?|constraints?)/i,
+  /new\s+instructions?\s*:/i,
+  /\[?\s*(system|assistant|human)\s*\]?\s*:/i,
+];
+
+/**
+ * Scan raw markdown for prompt-injection patterns.
+ * Returns an array of matched snippets (empty when clean).
+ * Exported so the Options page can show a live warning before saving.
+ */
+export function detectInjection(raw: string): string[] {
+  const flagged: string[] = [];
+  for (const pattern of INJECTION_PATTERNS) {
+    const match = raw.match(new RegExp(pattern.source, "gi"));
+    if (match) {
+      for (const m of match) {
+        if (!flagged.includes(m)) flagged.push(m);
+      }
+    }
+  }
+  return flagged;
+}
+
+/**
+ * Sanitize raw markdown before it is stored and sent to Gemini.
+ * Lines that contain injection patterns are replaced with a neutral placeholder
+ * so the rest of the profile remains intact.
+ */
+export function sanitizeRawMarkdown(raw: string): string {
+  return raw
+    .split("\n")
+    .map((line) =>
+      INJECTION_PATTERNS.some((p) => p.test(line))
+        ? "[line removed by Phasely security filter]"
+        : line,
+    )
+    .join("\n");
+}
 
 // ---------------------------------------------------------------------------
 // ProfileParseError
@@ -29,9 +104,25 @@ export class ProfileParseError extends Error {
  * Throws ProfileParseError if required fields are absent or have the wrong type.
  */
 export function parseProfile(markdown: string): Profile {
-  const parsed = matter(markdown);
-  const data: unknown = isRecord(parsed.data) ? parsed.data : {};
-  return validateProfile(data, markdown);
+  try {
+    if (!markdown.trim()) {
+      throw new ProfileParseError(["Profile is empty — paste your profile.md content"]);
+    }
+    // Check for the opening --- fence before attempting to parse, so users get a
+    // clear message instead of "firstName required" when the front-matter is absent.
+    if (!/^---/.test(markdown.trimStart())) {
+      throw new ProfileParseError([
+        "Missing YAML front-matter — profile must start with --- on the first line, followed by your fields (e.g. firstName: Alex)",
+      ]);
+    }
+    const { data } = extractFrontMatter(markdown);
+    return validateProfile(isRecord(data) ? data : {}, markdown);
+  } catch (err) {
+    if (err instanceof ProfileParseError) throw err;
+    // YAML syntax error — re-throw as a ProfileParseError with a useful message
+    // so the Options page can display it instead of "firstName cannot be empty".
+    throw new ProfileParseError([`YAML syntax error — ${String(err)}`]);
+  }
 }
 
 /**
@@ -92,13 +183,14 @@ export function validateProfile(data: unknown, rawMarkdown = ""): Profile {
     skills: getStringArray(data, "skills"),
     education: getEducationArray(data, "education"),
 
-    rawMarkdown,
+    rawMarkdown: sanitizeRawMarkdown(rawMarkdown),
   };
 }
 
 /**
  * Serialize a Profile back to a .md string with YAML front-matter.
- * Useful for the Options page "Export my data" feature.
+ * Preserves the original markdown body (Summary, Experience, etc.) that was
+ * stored in rawMarkdown so saving doesn't silently erase the user's prose.
  */
 export function profileToMarkdown(profile: Profile): string {
   // Build front-matter data — omit rawMarkdown (it's internal metadata)
@@ -126,7 +218,17 @@ export function profileToMarkdown(profile: Profile): string {
   if (profile.github !== undefined) frontMatter.github = profile.github;
   if (profile.portfolio !== undefined) frontMatter.portfolio = profile.portfolio;
 
-  return matter.stringify("", frontMatter);
+  const yamlSection = `---\n${stringifyYaml(frontMatter)}---\n`;
+
+  // Re-attach the markdown body that follows the front-matter close (---).
+  // rawMarkdown holds the full sanitised original markdown, so we strip the
+  // front-matter block and keep everything after it.
+  const bodyMatch = profile.rawMarkdown.match(
+    /^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)([\s\S]*)$/,
+  );
+  const body = (bodyMatch ? bodyMatch[1] : "").trimStart();
+
+  return body ? `${yamlSection}\n${body}` : yamlSection;
 }
 
 // ---------------------------------------------------------------------------

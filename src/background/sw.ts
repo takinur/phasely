@@ -9,9 +9,11 @@
  *   - All chrome.* calls are wrapped in try/catch with [Phasely] prefix logging.
  */
 
-import { getProfile, setProfile } from "@/lib/storage";
+import { getProfile, setProfile, getResume, setResume, getSettings, setSettings, setGeminiToken, getGeminiToken, wipeAll } from "@/lib/storage";
+import { DEFAULT_SETTINGS } from "@/lib/defaults";
+import type { StoredResume } from "@/lib/types";
 import { parseProfile, ProfileParseError } from "@/lib/profile";
-import type { DetectedField, Profile } from "@/lib/types";
+import type { DetectedField, ExtensionSettings, JobContext, Profile } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
 // Debug utility (no-op in production)
@@ -28,13 +30,20 @@ function debug(...args: unknown[]): void {
 // ---------------------------------------------------------------------------
 
 export type Message =
-  | { type: "DETECT_FIELDS" }
-  | { type: "FILL_ALL"; profile: Profile }
+  | { type: "DETECT_FIELDS"; profile?: Profile }
+  | { type: "FILL_ALL"; profile: Profile; resume: StoredResume | null }
   | { type: "FILL_ONLY"; fields: string[]; profile: Profile }
-  | { type: "SUBMIT" }
+  | { type: "SUBMIT"; settings?: Pick<ExtensionSettings, "confirmBeforeSubmit"> }
   | { type: "GENERATE_AI"; question: string; fieldKey: string }
   | { type: "GET_PROFILE" }
-  | { type: "SAVE_PROFILE"; markdown: string };
+  | { type: "SAVE_PROFILE"; markdown: string }
+  | { type: "GET_RESUME" }
+  | { type: "SAVE_RESUME"; base64: string; filename: string; mimeType: string }
+  | { type: "GET_SETTINGS" }
+  | { type: "SAVE_SETTINGS"; settings: ExtensionSettings }
+  | { type: "AUTH_GOOGLE" }
+  | { type: "GET_GEMINI_MODELS" }
+  | { type: "WIPE_DATA" };
 
 // ---------------------------------------------------------------------------
 // Response shapes
@@ -64,7 +73,9 @@ async function getActiveTabId(): Promise<number> {
 
 /**
  * Forward a message to the active tab's content script and await its response.
- * Typed via the Message union so callers never pass arbitrary objects.
+ * Returns null (instead of throwing) when the tab is not a web page (e.g.
+ * chrome://, about:, chrome-extension://) or when the content script has not
+ * yet loaded — callers treat null as "no content script available".
  */
 async function forwardToActiveTab(
   message: Message,
@@ -74,6 +85,17 @@ async function forwardToActiveTab(
     debug("Forwarding to tab", tabId, message.type);
     return await chrome.tabs.sendMessage(tabId, message);
   } catch (err) {
+    const msg = String(err);
+    // These errors mean the content script isn't reachable on this tab —
+    // not a real error for the user; callers handle null gracefully.
+    if (
+      msg.includes("Could not establish connection") ||
+      msg.includes("Receiving end does not exist") ||
+      msg.includes("No tab with id")
+    ) {
+      debug("forwardToActiveTab: content script not reachable on tab", tabId, "—", msg);
+      return null;
+    }
     console.error("[Phasely] forwardToActiveTab failed:", err);
     throw err;
   }
@@ -83,11 +105,16 @@ async function forwardToActiveTab(
 // Handlers
 // ---------------------------------------------------------------------------
 
-async function handleDetectFields(): Promise<Response<{ fields: DetectedField[] }>> {
+async function handleDetectFields(
+  profile?: Profile,
+): Promise<Response<{ fields: DetectedField[]; jobContext: JobContext | null }>> {
   try {
-    const result = await forwardToActiveTab({ type: "DETECT_FIELDS" });
+    const result = await forwardToActiveTab({ type: "DETECT_FIELDS", profile });
+    // null means the content script isn't available on this tab (non-web page)
+    if (result === null) return { ok: true, fields: [], jobContext: null };
     debug("DETECT_FIELDS result:", result);
-    return { ok: true, fields: result as DetectedField[] };
+    const payload = result as { fields: DetectedField[]; jobContext: JobContext | null };
+    return { ok: true, fields: payload.fields ?? [], jobContext: payload.jobContext ?? null };
   } catch (err) {
     return { ok: false, error: String(err) };
   }
@@ -97,7 +124,11 @@ async function handleFillAll(
   profile: Profile,
 ): Promise<Response<Record<never, never>>> {
   try {
-    await forwardToActiveTab({ type: "FILL_ALL", profile });
+    // Fetch the resume here in the SW so the content script never needs to
+    // make a nested round-trip back to the SW while handling FILL_ALL.
+    const resume = await getResume().catch(() => null);
+    const result = await forwardToActiveTab({ type: "FILL_ALL", profile, resume });
+    if (result === null) return { ok: false, error: "No fillable page is open in the active tab." };
     return { ok: true };
   } catch (err) {
     return { ok: false, error: String(err) };
@@ -109,16 +140,29 @@ async function handleFillOnly(
   profile: Profile,
 ): Promise<Response<Record<never, never>>> {
   try {
-    await forwardToActiveTab({ type: "FILL_ONLY", fields, profile });
+    const result = await forwardToActiveTab({ type: "FILL_ONLY", fields, profile });
+    if (result === null) return { ok: false, error: "No fillable page is open in the active tab." };
     return { ok: true };
   } catch (err) {
     return { ok: false, error: String(err) };
   }
 }
 
-async function handleSubmit(): Promise<Response<Record<never, never>>> {
+async function handleWipeData(): Promise<Response<Record<never, never>>> {
   try {
-    await forwardToActiveTab({ type: "SUBMIT" });
+    await wipeAll();
+    debug("WIPE_DATA: all storage cleared");
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
+async function handleSubmit(
+  settings?: Pick<ExtensionSettings, "confirmBeforeSubmit">,
+): Promise<Response<Record<never, never>>> {
+  try {
+    await forwardToActiveTab({ type: "SUBMIT", settings });
     return { ok: true };
   } catch (err) {
     return { ok: false, error: String(err) };
@@ -128,10 +172,7 @@ async function handleSubmit(): Promise<Response<Record<never, never>>> {
 // CLAUDE_INTEGRATION: dormant — activate in next feature release
 // const anthropic = new Anthropic({ apiKey: settings.claudeApiKey })
 
-function handleGenerateAI(
-  _question: string,
-  _fieldKey: string,
-): ErrResponse {
+function handleGenerateAI(): ErrResponse {
   // GEMINI_INTEGRATION: dormant — wire GeminiClient here when AI is activated
   return { ok: false, error: "AI not activated" };
 }
@@ -161,6 +202,222 @@ async function handleSaveProfile(
         error: `Profile validation failed: ${err.fields.join(", ")}`,
       };
     }
+    return { ok: false, error: String(err) };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Settings handlers
+// ---------------------------------------------------------------------------
+
+async function handleGetSettings(): Promise<Response<{ settings: ExtensionSettings }>> {
+  try {
+    const stored = await getSettings();
+    const settings: ExtensionSettings = stored ?? DEFAULT_SETTINGS;
+    debug("GET_SETTINGS:", settings.geminiModel);
+    return { ok: true, settings };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
+async function handleSaveSettings(
+  settings: ExtensionSettings,
+): Promise<Response<{ settings: ExtensionSettings }>> {
+  try {
+    await setSettings(settings);
+    debug("SAVE_SETTINGS stored:", settings.geminiModel);
+    return { ok: true, settings };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
+async function handleGetGeminiModels(): Promise<Response<{ oauthEnabled: boolean; models: string[] }>> {
+  try {
+    const fetchModels = async (token: string): Promise<{ ok: boolean; models: string[]; authFailed: boolean; error?: string }> => {
+      const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200", {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (!response.ok) {
+        if (response.status === 401 || response.status === 403) {
+          return { ok: false, models: [], authFailed: true };
+        }
+        const body = await response.text();
+        return {
+          ok: false,
+          models: [],
+          authFailed: false,
+          error: `Failed to fetch Gemini models (${response.status}): ${body}`,
+        };
+      }
+
+      const payload = (await response.json()) as {
+        models?: Array<{ name?: string; supportedGenerationMethods?: string[] }>;
+      };
+      const available = (payload.models ?? [])
+        .filter((model) => (model.supportedGenerationMethods ?? []).includes("generateContent"))
+        .map((model) => (model.name ?? "").replace(/^models\//, ""))
+        .filter((name) => name.startsWith("gemini-"));
+
+      return { ok: true, models: Array.from(new Set(available)), authFailed: false };
+    };
+
+    const readAuthToken = async (): Promise<string | null> => {
+      const token = await getGeminiToken();
+      return token && token.trim().length > 0 ? token : null;
+    };
+
+    const acquireAuthToken = async (interactive: boolean): Promise<string | null> => {
+      const token = await new Promise<string | null>((resolve, reject) => {
+        chrome.identity.getAuthToken({ interactive }, (result) => {
+          if (chrome.runtime.lastError) {
+            const message = chrome.runtime.lastError.message ?? "getAuthToken failed";
+            if (!interactive) {
+              resolve(null);
+              return;
+            }
+            reject(new Error(message));
+            return;
+          }
+
+          const tokenStr =
+            typeof result === "string"
+              ? result
+              : (result as { token?: string })?.token ?? "";
+          resolve(tokenStr || null);
+        });
+      });
+      if (token) {
+        await setGeminiToken(token);
+      }
+      return token;
+    };
+
+    const invalidateAuthToken = async (token: string): Promise<void> => {
+      await new Promise<void>((resolve) => {
+        chrome.identity.removeCachedAuthToken({ token }, () => resolve());
+      });
+    };
+
+    let token = await readAuthToken();
+    if (!token) {
+      return { ok: true, oauthEnabled: false, models: [] };
+    }
+
+    let result = await fetchModels(token);
+    if (result.ok) {
+      return { ok: true, oauthEnabled: true, models: result.models };
+    }
+
+    if (!result.authFailed) {
+      throw new Error(result.error ?? "Failed to fetch Gemini models");
+    }
+
+    await invalidateAuthToken(token);
+    token = await acquireAuthToken(false);
+    if (!token) {
+      return { ok: true, oauthEnabled: false, models: [] };
+    }
+
+    result = await fetchModels(token);
+    if (result.ok) {
+      return { ok: true, oauthEnabled: true, models: result.models };
+    }
+
+    if (result.authFailed) {
+      return { ok: true, oauthEnabled: false, models: [] };
+    }
+    throw new Error(result.error ?? "Failed to fetch Gemini models");
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Resume handlers
+// ---------------------------------------------------------------------------
+
+async function handleGetResume(): Promise<Response<{ resume: StoredResume | null }>> {
+  try {
+    const resume = await getResume();
+    debug("GET_RESUME:", resume ? resume.filename : "null");
+    return { ok: true, resume };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
+async function handleSaveResume(
+  base64: string,
+  filename: string,
+  mimeType: string,
+): Promise<Response<Record<never, never>>> {
+  try {
+    await setResume({ base64, filename, mimeType });
+    debug("SAVE_RESUME stored:", filename);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Google OAuth handler
+// ---------------------------------------------------------------------------
+
+/**
+ * Launch the Google OAuth flow using chrome.identity.launchWebAuthFlow.
+ *
+ * MV3 note: chrome.identity.getAuthToken is only available for extensions
+ * published on the Chrome Web Store with a verified OAuth client. During
+ * development we fall back to launchWebAuthFlow with the extension's own
+ * client ID. The token is stored in chrome.storage.session (ephemeral —
+ * never persists across SW restarts) and is NOT encrypted because it is
+ * already scoped to the browser profile.
+ *
+ * The token is also saved to chrome.storage.local under "geminiToken" so
+ * the Gemini client can retrieve it when needed.
+ *
+ * Returns { ok: true, token } on success, { ok: false, error } on failure.
+ */
+async function handleAuthGoogle(): Promise<Response<{ token: string }>> {
+  try {
+    const token = await new Promise<string>((resolve, reject) => {
+      try {
+        chrome.identity.getAuthToken({ interactive: true }, (result) => {
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message ?? "getAuthToken failed"));
+            return;
+          }
+          // @types/chrome ≥ 0.0.290 returns GetAuthTokenResult | string
+          const tokenStr =
+            typeof result === "string"
+              ? result
+              : (result as { token?: string })?.token ?? "";
+          if (!tokenStr) {
+            reject(new Error("getAuthToken returned no token"));
+          } else {
+            resolve(tokenStr);
+          }
+        });
+      } catch (err) {
+        reject(err);
+      }
+    });
+
+    debug("AUTH_GOOGLE: token acquired via getAuthToken");
+
+    // Persist the token encrypted so it is consistent with the rest of stored data.
+    await setGeminiToken(token);
+
+    return { ok: true, token };
+  } catch (err) {
+    console.error("[Phasely] AUTH_GOOGLE failed:", err);
     return { ok: false, error: String(err) };
   }
 }
@@ -196,7 +453,7 @@ chrome.runtime.onMessage.addListener(
       try {
         switch (msg.type) {
           case "DETECT_FIELDS":
-            sendResponse(await handleDetectFields());
+            sendResponse(await handleDetectFields(msg.profile));
             break;
 
           case "FILL_ALL":
@@ -208,11 +465,11 @@ chrome.runtime.onMessage.addListener(
             break;
 
           case "SUBMIT":
-            sendResponse(await handleSubmit());
+            sendResponse(await handleSubmit(msg.settings));
             break;
 
           case "GENERATE_AI":
-            sendResponse(handleGenerateAI(msg.question, msg.fieldKey));
+            sendResponse(handleGenerateAI());
             break;
 
           case "GET_PROFILE":
@@ -221,6 +478,44 @@ chrome.runtime.onMessage.addListener(
 
           case "SAVE_PROFILE":
             sendResponse(await handleSaveProfile(msg.markdown));
+            break;
+
+          case "GET_RESUME":
+            sendResponse(await handleGetResume());
+            break;
+
+          case "SAVE_RESUME": {
+            const raw = msg as unknown as Record<string, unknown>;
+            if (
+              typeof raw.base64 !== "string" ||
+              typeof raw.filename !== "string" ||
+              typeof raw.mimeType !== "string"
+            ) {
+              sendResponse({ ok: false, error: "SAVE_RESUME: missing or invalid fields" });
+              break;
+            }
+            sendResponse(await handleSaveResume(raw.base64, raw.filename, raw.mimeType));
+            break;
+          }
+
+          case "GET_SETTINGS":
+            sendResponse(await handleGetSettings());
+            break;
+
+          case "SAVE_SETTINGS":
+            sendResponse(await handleSaveSettings(msg.settings));
+            break;
+
+          case "AUTH_GOOGLE":
+            sendResponse(await handleAuthGoogle());
+            break;
+
+          case "GET_GEMINI_MODELS":
+            sendResponse(await handleGetGeminiModels());
+            break;
+
+          case "WIPE_DATA":
+            sendResponse(await handleWipeData());
             break;
 
           default: {

@@ -7,7 +7,7 @@
  * the framework's internal change detection.
  */
 
-import type { DetectedField, Profile } from "@/lib/types"
+import type { DetectedField } from "@/lib/types"
 
 // ---------------------------------------------------------------------------
 // Debug utility
@@ -46,12 +46,27 @@ const nativeTextAreaDescriptor = Object.getOwnPropertyDescriptor(
 // Event helpers
 // ---------------------------------------------------------------------------
 
-function dispatchInputEvents(el: HTMLElement): void {
-  // InputEvent for "input" (carries inputType info, expected by some frameworks)
-  el.dispatchEvent(new InputEvent("input", { bubbles: true, cancelable: true }))
-  // Plain Event for "change" and "blur"
+/**
+ * Dispatch the synthetic events required to trigger React/Vue/Angular change
+ * detection after a programmatic value write.
+ *
+ * @param el    The element that was written to.
+ * @param value The value that was written (used as InputEvent.data so LinkedIn's
+ *              React layer sees the correct payload).
+ */
+function dispatchInputEvents(el: HTMLElement, value?: string): void {
+  // InputEvent with inputType:"insertText" is required by LinkedIn's React
+  // synthetic event system to recognise the change as a real user keystroke.
+  el.dispatchEvent(
+    new InputEvent("input", {
+      bubbles: true,
+      cancelable: true,
+      inputType: "insertText",
+      data: value ?? null,
+    })
+  )
   el.dispatchEvent(new Event("change", { bubbles: true, cancelable: true }))
-  el.dispatchEvent(new Event("blur", { bubbles: true, cancelable: true }))
+  el.dispatchEvent(new FocusEvent("blur", { bubbles: true }))
 }
 
 // ---------------------------------------------------------------------------
@@ -67,6 +82,12 @@ export function setValue(
   value: string
 ): void {
   try {
+    // Focus the element first. LinkedIn and Indeed require the field to be
+    // in a focused state before their React/Vue layers recognise programmatic
+    // changes. el.focus() is the native DOM method (not just a dispatched event)
+    // so it actually moves browser focus and triggers the framework's focus handler.
+    el.focus()
+
     const descriptor =
       el instanceof HTMLTextAreaElement
         ? nativeTextAreaDescriptor
@@ -79,7 +100,7 @@ export function setValue(
       el.value = value
     }
 
-    dispatchInputEvents(el)
+    dispatchInputEvents(el, value)
     debug(`setValue: set "${el.name || el.id}" = "${value}"`)
   } catch (err) {
     console.error("[Phasely] setValue failed:", err)
@@ -217,7 +238,7 @@ export function setFile(el: HTMLInputElement, blob: Blob, filename: string): voi
  * Fill a single DetectedField using the appropriate setter.
  * Never throws — errors are caught and logged with the [Phasely] prefix.
  */
-export function fillField(field: DetectedField, _profile: Profile): void {
+export function fillField(field: DetectedField): void {
   try {
     const { element, fieldType, suggestedValue, profileKey } = field
 

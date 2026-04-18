@@ -1,7 +1,7 @@
 {
   "name": "phasely",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.2",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -16,10 +16,10 @@
     "@google/generative-ai": "^0.24.1",
     "@tailwindcss/vite": "^4.2.2",
     "@types/chrome": "^0.1.40",
-    "gray-matter": "^4.0.3",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
-    "tailwindcss": "^4.2.2"
+    "tailwindcss": "^4.2.2",
+    "yaml": "^2.8.3"
   },
   "devDependencies": {
     "@crxjs/vite-plugin": "^2.4.0",

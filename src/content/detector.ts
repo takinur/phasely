@@ -9,7 +9,7 @@
 
 import { FIELD_MAP } from "@/lib/fieldMap"
 import { scoreField } from "@/lib/fuzzyMatch"
-import type { DetectedField, Profile } from "@/lib/types"
+import type { DetectedField, JobContext, Profile } from "@/lib/types"
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -236,6 +236,178 @@ function collectElements(root: Document | ShadowRoot | Element): HTMLElement[] {
   }
 
   return results
+}
+
+// ---------------------------------------------------------------------------
+// Job context scraping
+// ---------------------------------------------------------------------------
+
+/**
+ * Attempt to extract structured job context (title, company, location,
+ * description, url) from the current page.
+ *
+ * Strategy (best-effort, graceful degradation):
+ *   1. JSON-LD structured data (most reliable — Greenhouse, Lever, many ATS)
+ *   2. Open Graph / meta tags
+ *   3. Common CSS class / data-attribute patterns used by major ATSs
+ *   4. Page title heuristic as last resort
+ *
+ * Returns null if we cannot extract enough signal to build a useful context.
+ */
+export function scrapeJobContext(): JobContext | null {
+  try {
+    const url = window.location.href
+
+    // --- 1. JSON-LD (schema.org/JobPosting) ---
+    const jsonLdScripts = Array.from(
+      document.querySelectorAll<HTMLScriptElement>('script[type="application/ld+json"]')
+    )
+    for (const script of jsonLdScripts) {
+      try {
+        const data = JSON.parse(script.textContent ?? "")
+        const entries = Array.isArray(data) ? data : [data]
+        for (const entry of entries) {
+          if (entry["@type"] === "JobPosting") {
+            const title = (entry.title ?? entry.name ?? "").trim()
+            const company =
+              (entry.hiringOrganization?.name ?? entry.hiringOrganization ?? "").toString().trim()
+            const location =
+              typeof entry.jobLocation === "object"
+                ? (
+                    entry.jobLocation?.address?.addressLocality ??
+                    entry.jobLocation?.address?.addressRegion ??
+                    ""
+                  ).trim()
+                : String(entry.jobLocation ?? "").trim()
+            const description = (entry.description ?? "")
+              .replace(/<[^>]+>/g, " ")   // strip any embedded HTML
+              .replace(/\s+/g, " ")
+              .trim()
+              .slice(0, 4000)             // cap at 4 k chars for AI context
+
+            if (title || company) {
+              debug("scrapeJobContext: found JSON-LD JobPosting")
+              return { title, company, location, description, url }
+            }
+          }
+        }
+      } catch {
+        // malformed JSON-LD — skip
+      }
+    }
+
+    // --- 2. Open Graph / meta tags ---
+    const ogTitle =
+      document
+        .querySelector<HTMLMetaElement>('meta[property="og:title"]')
+        ?.content?.trim() ?? ""
+    const ogDescription =
+      document
+        .querySelector<HTMLMetaElement>('meta[property="og:description"]')
+        ?.content?.trim() ?? ""
+    const metaDescription =
+      document
+        .querySelector<HTMLMetaElement>('meta[name="description"]')
+        ?.content?.trim() ?? ""
+
+    // --- 3. ATS-specific DOM patterns ---
+
+    /** Helper: first non-empty text content from a list of selectors. */
+    function firstText(...selectors: string[]): string {
+      for (const sel of selectors) {
+        const el = document.querySelector<HTMLElement>(sel)
+        const text = el?.textContent?.trim() ?? ""
+        if (text) return text
+      }
+      return ""
+    }
+
+    const domTitle = firstText(
+      // Greenhouse
+      "[data-qa='job-title']",
+      ".job-post__heading",
+      // Lever
+      ".posting-headline h2",
+      ".posting-title h2",
+      // Workday
+      "[data-automation-id='jobPostingHeader']",
+      // iCIMS
+      ".iCIMS_Header h1",
+      // SmartRecruiters
+      ".job-title h1",
+      // Generic fallbacks
+      "h1.job-title",
+      "h1[class*='title']",
+      "h1",
+    )
+
+    const domCompany = firstText(
+      // Greenhouse
+      "[data-qa='company-name']",
+      ".company-name",
+      // Lever
+      ".main-header-logo img[alt]",     // alt attribute used below
+      ".posting-categories .location",
+      // Workday
+      "[data-automation-id='company-name']",
+      // SmartRecruiters
+      ".company-name",
+      // Generic
+      "[class*='company']",
+    )
+
+    // Lever stores company name in the logo alt
+    const leverLogoEl = document.querySelector<HTMLImageElement>(".main-header-logo img")
+    const leverCompany = leverLogoEl?.alt?.trim() ?? ""
+
+    const domLocation = firstText(
+      "[data-qa='job-location']",
+      ".posting-categories .location",
+      "[data-automation-id='locations']",
+      ".iCIMS_InfoMsg",
+      ".job-location",
+      "[class*='location']",
+    )
+
+    // Job description body — scrape the largest text block as fallback
+    const descriptionEl = document.querySelector<HTMLElement>(
+      "[data-qa='job-description'], .posting-description, " +
+      "[data-automation-id='jobPostingDescription'], .job-description, " +
+      ".iCIMS_JobContent, #job-description, .description"
+    )
+    const domDescription = descriptionEl
+      ? descriptionEl.innerText.replace(/\s+/g, " ").trim().slice(0, 4000)
+      : ""
+
+    // --- 4. Page title heuristic ---
+    const pageTitle = document.title.trim()
+
+    // Assemble best-effort result
+    const title = domTitle || ogTitle || pageTitle
+    const company = domCompany || leverCompany
+    const location = domLocation
+    const description = domDescription || ogDescription || metaDescription
+
+    if (!title && !company && !description) {
+      debug("scrapeJobContext: insufficient signals, returning null")
+      return null
+    }
+
+    debug("scrapeJobContext: assembled from DOM/meta signals")
+    return { title, company, location, description, url }
+  } catch (err) {
+    console.error("[Phasely] scrapeJobContext failed:", err)
+    return null
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Detect response shape
+// ---------------------------------------------------------------------------
+
+export interface DetectFieldsResult {
+  fields: DetectedField[]
+  jobContext: JobContext | null
 }
 
 // ---------------------------------------------------------------------------

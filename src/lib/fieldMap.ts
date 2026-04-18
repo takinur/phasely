@@ -22,6 +22,9 @@ const RAW_FIELD_MAP: Record<string, string[]> = {
   "currentCompany":    ["current_company", "currentCompany", "current_employer", "company", "company_name", "employer", "employer_name", "organization", "current_organization"],
   "yearsExperience":   ["years_experience", "years_of_experience", "yearsExperience", "total_years_experience", "total_experience", "experience_years", "experience", "yoe"],
 
+  // File upload
+  "resumeUrl":         ["resume", "resume_upload", "resumeUpload", "cv", "cv_upload", "cvUpload", "upload_resume", "upload_cv", "resume_file", "cv_file", "attach_resume", "attach_cv", "resume_attachment"],
+
   // Open text — handled by AI, not direct fill
   "coverLetter":       ["cover_letter", "coverLetter", "cover_letter_text", "coverletter", "coverletter_text", "cover_letter_content", "covering_letter", "motivation", "motivation_letter", "why_us", "application_message", "letter"],
   "additionalInfo":    ["additional_information", "additionalInformation", "additional_info", "anything_else", "other_information", "other_info", "comments", "comment", "notes", "note", "notes_comments", "personal_statement", "summary", "about_you"],

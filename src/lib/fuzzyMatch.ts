@@ -97,7 +97,20 @@ export function scoreField(signals: string[], profileKey: string): number {
     if (candidates.some((c) => levenshtein(sig, c) <= 2)) return 0.85;
   }
 
-  // Tier 3: token overlap — any token from a signal appears in any candidate
+  // Tier 3: phrase subset — all tokens of a multi-word candidate appear in the signal.
+  // Handles labels like "Email address" → alias "email address" ⊆ signal ✓ (0.75 = green).
+  // Single-token candidates are skipped here to avoid trivial matches like "email" ⊆ anything.
+  for (const sig of normalisedSignals) {
+    const sigTokenSet = new Set(sig.split(" "));
+    for (const candidate of candidates) {
+      const candTokens = candidate.split(" ");
+      if (candTokens.length > 1 && candTokens.every((t) => sigTokenSet.has(t))) {
+        return 0.75;
+      }
+    }
+  }
+
+  // Tier 4: token overlap — any token from a signal appears in any candidate
   for (const sig of normalisedSignals) {
     const sigTokens = sig.split(" ");
     for (const candidate of candidates) {

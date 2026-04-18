@@ -7,7 +7,7 @@
  *   - No raw encryption key material is ever persisted to storage.
  */
 
-import type { ExtensionSettings, Profile, StoredData } from "@/lib/types";
+import type { ExtensionSettings, Profile, ProfilePreset, StoredData, StoredResume } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
 // Chrome storage promise wrappers
@@ -68,6 +68,7 @@ function storageClear(): Promise<void> {
 
 const KEY_KDF_SALT = "__kdf_salt";
 const KEY_PROFILE = "profile";
+const KEY_RESUME = "resume";
 const KEY_SETTINGS = "settings";
 const KDF_ITERATIONS = 310_000;
 
@@ -276,12 +277,92 @@ export async function getSettings(
 }
 
 // ---------------------------------------------------------------------------
+// Resume helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Encrypt and persist a resume blob.
+ * The caller must convert the File/Blob to base64 before calling.
+ */
+export async function setResume(
+  resume: StoredResume,
+  passphrase?: string,
+): Promise<void> {
+  try {
+    const encrypted = await encryptData(JSON.stringify(resume), passphrase);
+    await storageSet(KEY_RESUME, encrypted);
+  } catch (err) {
+    console.error("[Phasely] setResume failed:", err);
+    throw err;
+  }
+}
+
+/**
+ * Retrieve and decrypt the stored resume.
+ * Returns null if no resume has been uploaded yet.
+ */
+export async function getResume(passphrase?: string): Promise<StoredResume | null> {
+  try {
+    const stored = await storageGet<{ iv: string; data: string }>(KEY_RESUME);
+    if (stored === null) return null;
+    const json = await decryptData(stored.iv, stored.data, passphrase);
+    const parsed = parseJsonSafe(json);
+    if (!isStoredResume(parsed)) {
+      console.error("[Phasely] getResume: invalid shape in storage");
+      return null;
+    }
+    return parsed;
+  } catch (err) {
+    console.error("[Phasely] getResume failed:", err);
+    throw err;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Gemini token helpers
+// ---------------------------------------------------------------------------
+
+const KEY_GEMINI_TOKEN = "geminiToken";
+
+/**
+ * Encrypt and persist the Google OAuth token.
+ */
+export async function setGeminiToken(token: string): Promise<void> {
+  try {
+    const encrypted = await encryptData(token);
+    await storageSet(KEY_GEMINI_TOKEN, encrypted);
+  } catch (err) {
+    console.error("[Phasely] setGeminiToken failed:", err);
+    throw err;
+  }
+}
+
+/**
+ * Retrieve and decrypt the Google OAuth token.
+ * Returns null if not yet stored.
+ */
+export async function getGeminiToken(): Promise<string | null> {
+  try {
+    const stored = await storageGet<{ iv: string; data: string }>(KEY_GEMINI_TOKEN);
+    if (stored === null) return null;
+    return await decryptData(stored.iv, stored.data);
+  } catch (err) {
+    console.error("[Phasely] getGeminiToken failed:", err);
+    throw err;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Generic typed get / set — keyed on StoredData
 // ---------------------------------------------------------------------------
 
 /**
  * Retrieve and decrypt any top-level StoredData key.
  * Returns null when the key has never been written.
+ *
+ * @internal Prefer the typed helpers (getProfile, getResume, getSettings,
+ * getGeminiToken). This function skips shape validation — callers must
+ * validate the returned value themselves.
  */
 export async function get<T extends StoredData[keyof StoredData]>(
   key: keyof StoredData,
@@ -299,6 +380,10 @@ export async function get<T extends StoredData[keyof StoredData]>(
 
 /**
  * Encrypt and persist any top-level StoredData key.
+ *
+ * @internal Prefer the typed helpers (setProfile, setResume, setSettings,
+ * setGeminiToken). This function accepts any serialisable value without
+ * type checking.
  */
 export async function set<T extends StoredData[keyof StoredData]>(
   key: keyof StoredData,
@@ -416,12 +501,19 @@ function isProfile(value: unknown): value is Profile {
   );
 }
 
+function isStoredResume(value: unknown): value is StoredResume {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.base64 === "string" &&
+    typeof value.filename === "string" &&
+    typeof value.mimeType === "string"
+  );
+}
+
 function isExtensionSettings(value: unknown): value is ExtensionSettings {
   if (!isRecord(value)) return false;
 
-  const isGeminiModel =
-    value.geminiModel === "gemini-1.5-flash" ||
-    value.geminiModel === "gemini-1.5-pro";
+  const isGeminiModel = typeof value.geminiModel === "string" && value.geminiModel.length > 0;
   const isProvider =
     value.preferredAiProvider === "gemini" || value.preferredAiProvider === "claude";
 

@@ -1,0 +1,28 @@
+<svg width="760" height="200" viewBox="0 0 760 200" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="iconBg" x1="16" y1="8" x2="112" y2="120" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0B1220"/>
+      <stop offset="1" stop-color="#1E293B"/>
+    </linearGradient>
+    <linearGradient id="iconAccent" x1="28" y1="22" x2="102" y2="106" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#22D3EE"/>
+      <stop offset="0.52" stop-color="#60A5FA"/>
+      <stop offset="1" stop-color="#A78BFA"/>
+    </linearGradient>
+    <linearGradient id="wordmark" x1="175" y1="58" x2="585" y2="146" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#22D3EE"/>
+      <stop offset="0.5" stop-color="#60A5FA"/>
+      <stop offset="1" stop-color="#A78BFA"/>
+    </linearGradient>
+  </defs>
+
+  <g transform="translate(24 36)">
+    <rect x="8" y="8" width="112" height="112" rx="28" fill="url(#iconBg)"/>
+    <rect x="12" y="12" width="104" height="104" rx="24" stroke="url(#iconAccent)" stroke-opacity="0.5"/>
+    <path d="M35 28H67C83.0163 28 96 40.9837 96 57C96 73.0163 83.0163 86 67 86H55V102H35V28ZM55 66H66C71.5228 66 76 61.5228 76 56C76 50.4772 71.5228 46 66 46H55V66Z" fill="url(#iconAccent)"/>
+    <path d="M55 92H83" stroke="url(#iconAccent)" stroke-width="6" stroke-linecap="round"/>
+    <circle cx="89" cy="92" r="5" fill="url(#iconAccent)"/>
+  </g>
+
+  <text x="186" y="124" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="88" font-weight="700" letter-spacing="3" fill="url(#wordmark)">PHASELY</text>
+</svg>

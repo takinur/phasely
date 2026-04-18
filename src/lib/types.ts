@@ -48,16 +48,36 @@ export interface JobContext {
 }
 
 export interface ExtensionSettings {
-  geminiModel: "gemini-1.5-flash" | "gemini-1.5-pro"
+  geminiModel: string
   autoSubmit: boolean
   confirmBeforeSubmit: boolean
   claudeApiKey?: string       // dormant in v1, active in next feature
   preferredAiProvider: "gemini" | "claude"  // "gemini" locked in v1
 }
 
+export interface StoredResume {
+  base64: string     // ArrayBuffer → base64 of the PDF bytes
+  filename: string
+  mimeType: string
+}
+
+export interface ProfilePreset {
+  id: string;
+  name: string;
+  overrides: {
+    currentTitle?: string;
+    salaryExpectation?: string;
+    noticePeriod?: string;
+    remotePreference?: string;
+    workAuth?: string;
+    willingToRelocate?: boolean;
+  };
+}
+
 export interface StoredData {
   profile: Profile | null
-  resumeBlob: string | null   // base64 encoded
+  resume: StoredResume | null
   settings: ExtensionSettings
   geminiToken: string | null  // OAuth token, managed by chrome.identity
+  presets: ProfilePreset[]
 }
