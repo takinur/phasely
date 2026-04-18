@@ -6,7 +6,7 @@
     "permissions": ["activeTab", "tabs", "scripting", "storage", "identity"],
     "host_permissions": ["https://generativelanguage.googleapis.com/*"],
     "oauth2": {
-        "client_id": "REPLACE_WITH_GOOGLE_OAUTH_CLIENT_ID.apps.googleusercontent.com",
+        "client_id": "GOOGLE_OAUTH_CLIENT_ID.apps.googleusercontent.com",
         "scopes": ["https://www.googleapis.com/auth/generative-language"]
     },
     "action": {
