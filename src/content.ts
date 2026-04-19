@@ -38,7 +38,7 @@ chrome.runtime.onMessage.addListener(
     }
 
     const msg = message as { type: string } & Record<string, unknown>
-    const contentMessageTypes = new Set(["DETECT_FIELDS", "FILL_ALL", "FILL_ONLY", "FILL_AI_TEXT", "SUBMIT"])
+    const contentMessageTypes = new Set(["DETECT_FIELDS", "FILL_ALL", "FILL_ONLY", "FILL_AI_TEXT", "GET_JOB_CONTEXT", "SUBMIT"])
     if (!contentMessageTypes.has(msg.type)) {
       return false
     }
@@ -46,6 +46,12 @@ chrome.runtime.onMessage.addListener(
     ;(async () => {
       try {
         switch (msg.type) {
+          case "GET_JOB_CONTEXT": {
+            const jobContext = scrapeJobContext()
+            sendResponse({ ok: true, jobContext })
+            break
+          }
+
           case "DETECT_FIELDS": {
             const profile = msg.profile as Profile | undefined
             const fields = profile ? detectFields(profile) : []
@@ -55,6 +61,15 @@ chrome.runtime.onMessage.addListener(
           }
 
           case "FILL_ALL": {
+            // H2: validate profile shape before trusting the cast
+            if (
+              typeof msg.profile !== "object" ||
+              msg.profile === null ||
+              typeof (msg.profile as Record<string, unknown>).firstName !== "string"
+            ) {
+              sendResponse({ ok: false, error: "FILL_ALL: invalid profile" })
+              break
+            }
             const profile = msg.profile as Profile
             const resume = msg.resume as { base64: string; filename: string; mimeType: string } | null
             const fields = detectFields(profile)
@@ -62,13 +77,18 @@ chrome.runtime.onMessage.addListener(
             for (const field of fields) {
               if (field.fieldType === "file") {
                 if (resume) {
-                  const binary = atob(resume.base64)
-                  const bytes = new Uint8Array(binary.length)
-                  for (let i = 0; i < binary.length; i++) {
-                    bytes[i] = binary.charCodeAt(i)
+                  // M3: guard against malformed base64
+                  try {
+                    const binary = atob(resume.base64)
+                    const bytes = new Uint8Array(binary.length)
+                    for (let i = 0; i < binary.length; i++) {
+                      bytes[i] = binary.charCodeAt(i)
+                    }
+                    const blob = new Blob([bytes], { type: resume.mimeType })
+                    fillFile(field.element as HTMLInputElement, blob, resume.filename)
+                  } catch {
+                    console.warn("[Phasely] Skipping file field — invalid base64 in stored resume")
                   }
-                  const blob = new Blob([bytes], { type: resume.mimeType })
-                  fillFile(field.element as HTMLInputElement, blob, resume.filename)
                 }
               } else {
                 fillField(field)
@@ -80,8 +100,17 @@ chrome.runtime.onMessage.addListener(
           }
 
           case "FILL_ONLY": {
+            // H2: validate profile shape
+            if (
+              typeof msg.profile !== "object" ||
+              msg.profile === null ||
+              typeof (msg.profile as Record<string, unknown>).firstName !== "string"
+            ) {
+              sendResponse({ ok: false, error: "FILL_ONLY: invalid profile" })
+              break
+            }
             const profile = msg.profile as Profile
-            const keys = new Set(msg.fields as string[])
+            const keys = new Set(Array.isArray(msg.fields) ? (msg.fields as string[]) : [])
             const fields = detectFields(profile).filter((f) => keys.has(f.profileKey))
             for (const field of fields) {
               fillField(field)
@@ -93,6 +122,15 @@ chrome.runtime.onMessage.addListener(
           case "FILL_AI_TEXT": {
             // Fill a single AI-generated value into the matching field on the page.
             // The SW generates the text and sends it here to inject into the DOM.
+            // H2: validate profile shape
+            if (
+              typeof msg.profile !== "object" ||
+              msg.profile === null ||
+              typeof (msg.profile as Record<string, unknown>).firstName !== "string"
+            ) {
+              sendResponse({ ok: false, error: "FILL_AI_TEXT: invalid profile" })
+              break
+            }
             const profile = msg.profile as Profile
             const key = msg.key as string
             const value = msg.value as string

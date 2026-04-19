@@ -512,6 +512,8 @@ function SettingsSection({
   const [wipeError, setWipeError] = useState<string | null>(null);
 
   const handleWipe = useCallback(async () => {
+    // C3: require explicit confirmation before destroying all user data
+    if (!window.confirm("Permanently delete your profile, resume, API key, and all settings? This cannot be undone.")) return;
     setWiping(true);
     setWipeError(null);
     try {
@@ -608,6 +610,7 @@ function AiSettingsSection({
   const [selectedModel, setSelectedModel] = useState(settings.geminiModel);
   const [modelSaving, setModelSaving] = useState(false);
   const [modelSaveSuccess, setModelSaveSuccess] = useState(false);
+  const [modelSaveError, setModelSaveError] = useState<string | null>(null);
 
   const fetchModels = useCallback(async () => {
     setModelsLoading(true);
@@ -661,6 +664,7 @@ function AiSettingsSection({
   const handleSaveModel = useCallback(async (model: string) => {
     setModelSaving(true);
     setModelSaveSuccess(false);
+    setModelSaveError(null);
     try {
       const updated: ExtensionSettings = { ...settings, geminiModel: model };
       const res = await sendMsg<{ ok: boolean; settings: ExtensionSettings; error?: string }>({
@@ -671,8 +675,10 @@ function AiSettingsSection({
       onSettingsSaved(res.settings);
       setModelSaveSuccess(true);
       setTimeout(() => setModelSaveSuccess(false), 2000);
-    } catch {
-      // Silently revert — model save errors are non-critical
+    } catch (err) {
+      setModelSaveError(String(err));
+      // Revert the select back to the previously saved model
+      setSelectedModel(settings.geminiModel);
     } finally {
       setModelSaving(false);
     }
@@ -764,6 +770,7 @@ function AiSettingsSection({
             </label>
 
             {modelsError && <Alert type="error">{modelsError}</Alert>}
+            {modelSaveError && <Alert type="error">Model save failed: {modelSaveError}</Alert>}
 
             {!modelsLoading && !modelsError && availableModels.length > 0 && (
               <>

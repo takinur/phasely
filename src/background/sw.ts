@@ -32,8 +32,10 @@ function debug(...args: unknown[]): void {
 
 export type Message =
   | { type: "DETECT_FIELDS"; profile?: Profile }
+  | { type: "GET_JOB_CONTEXT" }
   | { type: "FILL_ALL"; profile: Profile; resume: StoredResume | null }
   | { type: "FILL_ONLY"; fields: string[]; profile: Profile }
+  | { type: "FILL_AI_TEXT"; key: string; value: string; profile: Profile }
   | { type: "SUBMIT"; settings?: Pick<ExtensionSettings, "confirmBeforeSubmit"> }
   | { type: "GENERATE_AI"; question: string; fieldKey: string }
   | { type: "GET_PROFILE" }
@@ -280,11 +282,11 @@ async function handleGenerateCoverLetter(): Promise<Response<{ text: string; fil
     if (!profile) return { ok: false, error: "No profile saved. Add your profile in Settings first." };
     if (!apiKey) return { ok: false, error: "No Gemini API key saved. Add one in Settings → AI Settings." };
 
-    const model = settings?.geminiModel ?? "gemini-3-flash-preview";
+    const model = settings?.geminiModel ?? "gemini-1.5-flash";
 
-    // 2. Get job context from the active tab via the content script.
-    const tabResult = await forwardToActiveTab({ type: "DETECT_FIELDS", profile });
-    const jobContext = (tabResult as { jobContext?: { title: string; company: string; location: string; description: string; url: string } } | null)?.jobContext ?? {
+    // 2. Get job context from the active tab — dedicated message, no profile sent.
+    const ctxResult = await forwardToActiveTab({ type: "GET_JOB_CONTEXT" });
+    const jobContext = (ctxResult as { jobContext?: JobContext } | null)?.jobContext ?? {
       title: "the role",
       company: "the company",
       location: "",
@@ -306,8 +308,15 @@ async function handleGenerateCoverLetter(): Promise<Response<{ text: string; fil
     });
 
     if (!response.ok) {
-      const text = await response.text();
-      return { ok: false, error: `Gemini error (${response.status}): ${text}` };
+      // Parse only the message field — never echo the raw body which may contain the API key.
+      let errMsg = `Gemini error (${response.status})`;
+      try {
+        const errBody = (await response.json()) as { error?: { message?: string } };
+        if (errBody?.error?.message) errMsg += `: ${errBody.error.message}`;
+      } catch {
+        // Body not JSON — use status only.
+      }
+      return { ok: false, error: errMsg };
     }
 
     const data = (await response.json()) as {
@@ -322,11 +331,11 @@ async function handleGenerateCoverLetter(): Promise<Response<{ text: string; fil
     // Always return the generated text to the popup regardless of fill outcome.
     let filled = false;
     const fillResult = await forwardToActiveTab({
-      type: "FILL_AI_TEXT" as never,
+      type: "FILL_AI_TEXT",
       key: "coverLetter",
       value: generatedText,
       profile,
-    } as never);
+    });
 
     if (fillResult !== null) {
       filled = (fillResult as { ok: boolean }).ok === true;
@@ -506,6 +515,27 @@ chrome.runtime.onMessage.addListener(
           case "SAVE_PRESETS":
             sendResponse(await handleSavePresets(msg.presets));
             break;
+
+          case "GET_JOB_CONTEXT": {
+            const ctxResult = await forwardToActiveTab({ type: "GET_JOB_CONTEXT" });
+            if (ctxResult === null) {
+              sendResponse({ ok: true, jobContext: null });
+            } else {
+              sendResponse({ ok: true, ...(ctxResult as Record<string, unknown>) });
+            }
+            break;
+          }
+
+          case "FILL_AI_TEXT": {
+            // Forwards AI-generated text to the content script to inject into the DOM.
+            const result = await forwardToActiveTab({ type: "FILL_AI_TEXT", key: msg.key, value: msg.value, profile: msg.profile });
+            if (result === null) {
+              sendResponse({ ok: false, error: "No active tab content script available." });
+            } else {
+              sendResponse(result);
+            }
+            break;
+          }
 
           case "WIPE_DATA":
             sendResponse(await handleWipeData());
