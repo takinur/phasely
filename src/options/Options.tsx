@@ -398,25 +398,26 @@ function ProfileField({ label, value }: { label: string; value: string }) {
 // Live YAML validator — shown below the textarea as the user types
 // ---------------------------------------------------------------------------
 
+type ValidationState =
+  | { status: "idle" }
+  | { status: "valid"; firstName: string; lastName: string; email: string; skillsCount: number; educationCount: number }
+  | { status: "invalid"; errors: string[] };
+
 /**
  * Parses the textarea content in real time (debounced 400 ms) and shows either
  * a green "looks good" summary or a red list of specific errors — so users fix
  * problems before clicking Save, not after.
  */
 function ProfileValidator({ markdown }: { markdown: string }) {
-  type ValidationState =
-    | { status: "idle" }
-    | { status: "valid"; firstName: string; lastName: string; email: string; skillsCount: number; educationCount: number }
-    | { status: "invalid"; errors: string[] };
 
   const [state, setState] = useState<ValidationState>({ status: "idle" });
 
   useEffect(() => {
-    if (!markdown.trim()) {
-      setState({ status: "idle" });
-      return;
-    }
     const timer = setTimeout(() => {
+      if (!markdown.trim()) {
+        setState({ status: "idle" });
+        return;
+      }
       try {
         const profile = parseProfile(markdown);
         setState({
@@ -1052,6 +1053,18 @@ export function Options() {
         <p className="text-xs text-gray-400 text-center pb-4">
           Phasely v1.0.2 — open source · encrypted locally · zero telemetry
         </p>
+        {/* Github Link */}
+        <div className="text-center">
+          crafted with care <a
+            href="https://github.com/phasely/phasely"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sm text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 dark:hover:text-indigo-300"
+          >
+           Source code on GitHub
+          </a>
+        </div>
+
       </main>
     </div>
   );
