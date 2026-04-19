@@ -5,7 +5,7 @@ import type { ExtensionSettings } from "@/lib/types";
  * the service worker and the Options page.
  */
 export const DEFAULT_SETTINGS: ExtensionSettings = {
-  geminiModel: "gemini-1.5-flash",
+  geminiModel: "gemini-3-flash-preview",
   autoSubmit: false,
   confirmBeforeSubmit: true,
 };

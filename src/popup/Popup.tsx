@@ -8,7 +8,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import type { ExtensionSettings, Profile, StoredResume } from "@/lib/types";
+import type { ExtensionSettings, JobContext, Profile, StoredResume } from "@/lib/types";
 import logoIcon from "@/assets/logo_phasely.png";
 
 // ---------------------------------------------------------------------------
@@ -19,7 +19,10 @@ type MsgPayload =
   | { type: "GET_PROFILE" }
   | { type: "GET_SETTINGS" }
   | { type: "GET_RESUME" }
+  | { type: "GET_GEMINI_MODELS" }
+  | { type: "GET_JOB_CONTEXT" }
   | { type: "FILL_ALL"; profile: Profile }
+  | { type: "GENERATE_COVER_LETTER" }
   | { type: "SUBMIT"; settings?: Pick<ExtensionSettings, "confirmBeforeSubmit"> };
 
 function sendMsg<T = unknown>(payload: MsgPayload, timeoutMs = 20_000): Promise<T> {
@@ -52,10 +55,68 @@ function StatusDot({ ok }: { ok: boolean }) {
   return (
     <span
       className={[
-        "inline-block w-2 h-2 rounded-full",
-        ok ? "bg-green-500" : "bg-red-400",
+        "inline-block w-2.5 h-2.5 rounded-full popup-status-dot",
+        ok ? "popup-status-ok" : "popup-status-missing",
       ].join(" ")}
     />
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Cover letter result panel
+// ---------------------------------------------------------------------------
+
+function CoverLetterResult({ text, filled }: { text: string; filled: boolean }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = useCallback(() => {
+    // Primary: Clipboard API (works in popup with user gesture)
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text).then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      }).catch(() => fallbackCopy());
+    } else {
+      fallbackCopy();
+    }
+
+    function fallbackCopy() {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.cssText = "position:fixed;top:0;left:0;opacity:0";
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      try {
+        document.execCommand("copy");
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      } finally {
+        document.body.removeChild(ta);
+      }
+    }
+  }, [text]);
+
+  return (
+    <div className="rounded-md border border-gray-200 bg-gray-50 p-2.5 space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-medium text-gray-700">
+          {filled ? "✓ Filled into form" : "No field found — copy manually"}
+        </span>
+        <button
+          onClick={handleCopy}
+          className="text-xs font-medium text-indigo-600 hover:text-indigo-800 transition-colors"
+        >
+          {copied ? "Copied!" : "Copy"}
+        </button>
+      </div>
+      <textarea
+        readOnly
+        value={text}
+        rows={6}
+        className="w-full rounded border border-gray-200 bg-white px-2 py-1.5 text-xs text-gray-800 leading-relaxed resize-none focus:outline-none focus:ring-1 focus:ring-indigo-400"
+      />
+    </div>
   );
 }
 
@@ -63,30 +124,39 @@ function StatusDot({ ok }: { ok: boolean }) {
 // Main component
 // ---------------------------------------------------------------------------
 
-type Phase = "idle" | "filling" | "submitting";
+type Phase = "idle" | "filling" | "submitting" | "generating";
 
 export function Popup() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [settings, setSettings] = useState<ExtensionSettings | null>(null);
   const [hasResume, setHasResume] = useState(false);
+  const [apiKeySet, setApiKeySet] = useState(false);
+  const [jobContext, setJobContext] = useState<JobContext | null>(null);
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState<string | null>(null);
   const [fillDone, setFillDone] = useState(false);
+  const [coverLetterDone, setCoverLetterDone] = useState(false);
+  const [coverLetterText, setCoverLetterText] = useState<string | null>(null);
+  const [coverLetterFilled, setCoverLetterFilled] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
 
     (async () => {
       try {
-        const [pRes, rRes, sRes] = await Promise.all([
+        const [pRes, rRes, sRes, gRes, jRes] = await Promise.all([
           sendMsg<{ ok: boolean; profile: Profile | null }>({ type: "GET_PROFILE" }),
           sendMsg<{ ok: boolean; resume: StoredResume | null }>({ type: "GET_RESUME" }),
           sendMsg<{ ok: boolean; settings: ExtensionSettings }>({ type: "GET_SETTINGS" }),
+          sendMsg<{ ok: boolean; apiKeySet: boolean; models: string[] }>({ type: "GET_GEMINI_MODELS" }),
+          sendMsg<{ ok: boolean; jobContext: JobContext | null }>({ type: "GET_JOB_CONTEXT" }),
         ]);
         if (cancelled) return;
         if (pRes.ok) setProfile(pRes.profile);
         if (rRes.ok) setHasResume(rRes.resume !== null);
         if (sRes.ok) setSettings(sRes.settings);
+        if (gRes.ok) setApiKeySet(gRes.apiKeySet);
+        if (jRes.ok) setJobContext(jRes.jobContext);
       } catch (err) {
         if (!cancelled) setError(String(err));
       }
@@ -155,24 +225,54 @@ export function Popup() {
     }
   }, [profile, settings]);
 
+  const handleGenerateCoverLetter = useCallback(async () => {
+    setPhase("generating");
+    setError(null);
+    setCoverLetterDone(false);
+    setCoverLetterText(null);
+    setCoverLetterFilled(false);
+    try {
+      const res = await sendMsg<{ ok: boolean; text?: string; filled?: boolean; error?: string }>(
+        { type: "GENERATE_COVER_LETTER" },
+        60_000,
+      );
+      if (!res.ok) throw new Error(res.error ?? "Generation failed");
+      setCoverLetterDone(true);
+      setCoverLetterText(res.text ?? null);
+      setCoverLetterFilled(res.filled ?? false);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setPhase("idle");
+    }
+  }, []);
+
   const hasProfile = profile !== null;
   const isWorking = phase !== "idle";
-  const canFill = hasProfile && hasResume && !isWorking;
+  // Fill only requires a profile; resume is optional (file fields are skipped gracefully when absent).
+  const canFill = hasProfile && !isWorking;
+  const canGenerate = hasProfile && apiKeySet && !isWorking;
+
+  const generateDisabledReason = !hasProfile
+    ? "Add your profile in Settings first"
+    : !apiKeySet
+      ? "Add a Gemini API key in Settings → AI Settings"
+      : null;
 
   return (
-    <div className="w-80 min-h-36 bg-white font-sans text-sm flex flex-col">
+    <div className="popup-shell w-80 min-h-36 text-sm flex flex-col">
       {/* Header */}
-      <header className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
+      <header className="popup-header flex items-center justify-between px-4 py-3">
         <div className="flex items-center gap-2">
-          <img src={logoIcon} alt="Phasely logo" className="w-5 h-5 rounded" />
-          <span className="font-bold text-base tracking-tight text-gray-900">Phasely</span>
+          <img src={logoIcon} alt="Phasely logo" className="w-5 h-5 rounded-md ring-1 ring-white/20" />
+          <span className="popup-brand font-semibold text-base tracking-tight">Phasely</span>
           <StatusDot ok={hasProfile && hasResume} />
         </div>
         <a
           href={chrome.runtime.getURL("src/options.html")}
           target="_blank"
           rel="noreferrer"
-          className="text-xs text-indigo-500 hover:text-indigo-700 hover:underline"
+          className="popup-link text-xs"
         >
           Settings
         </a>
@@ -181,7 +281,7 @@ export function Popup() {
       <div className="flex flex-col gap-3 p-4 flex-1">
         {/* No profile */}
         {!hasProfile && (
-          <div className="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
+          <div className="popup-alert popup-alert-warning px-3 py-2 text-xs">
             No profile found. Open{" "}
             <a
               href={chrome.runtime.getURL("src/options.html")}
@@ -197,7 +297,7 @@ export function Popup() {
 
         {/* No resume */}
         {hasProfile && !hasResume && (
-          <div className="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
+          <div className="popup-alert popup-alert-warning px-3 py-2 text-xs">
             <span className="font-semibold">No resume uploaded.</span> Add one in{" "}
             <a
               href={chrome.runtime.getURL("src/options.html")}
@@ -213,25 +313,25 @@ export function Popup() {
 
         {/* Profile chip */}
         {hasProfile && profile && (
-          <div className="flex items-center gap-2 text-xs text-gray-500">
-            <span className="truncate font-medium text-gray-700">
+          <div className="popup-chip flex items-center gap-2 text-xs px-2.5 py-1.5 rounded-md">
+            <span className="truncate font-semibold popup-chip-name">
               {profile.firstName} {profile.lastName}
             </span>
-            <span className="text-gray-300">·</span>
-            <span className="truncate">{profile.currentTitle}</span>
+            <span className="popup-chip-dot">•</span>
+            <span className="truncate popup-chip-role">{profile.currentTitle}</span>
           </div>
         )}
 
         {/* Error */}
         {error && (
-          <div className="rounded-md bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-700 break-words">
+          <div className="popup-alert popup-alert-error px-3 py-2 text-xs wrap-break-word">
             {error}
           </div>
         )}
 
         {/* Fill done */}
         {fillDone && !error && (
-          <div className="rounded-md bg-green-50 border border-green-200 px-3 py-2 text-xs text-green-700">
+          <div className="popup-alert popup-alert-success px-3 py-2 text-xs">
             Fields filled successfully.
           </div>
         )}
@@ -242,10 +342,10 @@ export function Popup() {
             onClick={handleFill}
             disabled={!canFill}
             className={[
-              "flex-1 rounded-md px-3 py-2 text-sm font-medium transition-colors flex items-center justify-center gap-1.5",
+              "flex-1 rounded-md px-3 py-2 text-sm font-medium transition-all duration-150 flex items-center justify-center gap-1.5",
               canFill
-                ? "bg-indigo-600 text-white hover:bg-indigo-700"
-                : "bg-gray-100 text-gray-400 cursor-not-allowed",
+                ? "popup-btn popup-btn-fill"
+                : "popup-btn-disabled cursor-not-allowed",
             ].join(" ")}
           >
             {phase === "filling" ? (
@@ -264,10 +364,10 @@ export function Popup() {
             onClick={handleFillAndSubmit}
             disabled={!canFill}
             className={[
-              "flex-1 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+              "flex-1 rounded-md px-3 py-2 text-sm font-medium transition-all duration-150",
               canFill
-                ? "bg-green-600 text-white hover:bg-green-700"
-                : "bg-gray-100 text-gray-400 cursor-not-allowed",
+                ? "popup-btn popup-btn-submit"
+                : "popup-btn-disabled cursor-not-allowed",
             ].join(" ")}
           >
             {phase === "submitting" ? "Submitting…" : "Fill & Submit"}
@@ -280,14 +380,54 @@ export function Popup() {
             onClick={submitApplication}
             disabled={isWorking}
             className={[
-              "w-full rounded-md px-3 py-2 text-sm font-medium border transition-colors",
+              "w-full rounded-md px-3 py-2 text-sm font-medium border transition-all duration-150",
               !isWorking
-                ? "border-gray-300 text-gray-700 hover:border-gray-400 hover:bg-gray-50"
-                : "border-gray-200 text-gray-300 cursor-not-allowed",
+                ? "popup-btn-secondary"
+                : "popup-btn-disabled cursor-not-allowed",
             ].join(" ")}
           >
             {phase === "submitting" ? "Submitting…" : "Submit Application"}
           </button>
+        )}
+
+        {/* Generate cover letter — requires profile + Gemini API key + detected job title */}
+        {hasProfile && (
+          <div className="space-y-1.5">
+            <button
+              onClick={handleGenerateCoverLetter}
+              disabled={!canGenerate}
+              title={generateDisabledReason ?? undefined}
+              className={[
+                "w-full rounded-md px-3 py-2 text-sm font-medium border transition-all duration-150 flex items-center justify-center gap-1.5",
+                canGenerate
+                  ? "popup-btn-secondary"
+                  : "popup-btn-disabled cursor-not-allowed opacity-50",
+              ].join(" ")}
+            >
+              {phase === "generating" ? (
+                "Generating…"
+              ) : (
+                <>
+                  <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                    <path fillRule="evenodd" d="M9.243 3.03a1 1 0 01.727 1.213L9.53 6h2.94l.56-2.243a1 1 0 111.94.486L14.53 6H17a1 1 0 110 2h-2.97l-1 4H15a1 1 0 110 2h-2.47l-.56 2.243a1 1 0 11-1.94-.486L10.47 14H7.53l-.56 2.243a1 1 0 11-1.94-.486L5.47 14H3a1 1 0 110-2h2.97l1-4H5a1 1 0 110-2h2.47l.56-2.243a1 1 0 011.213-.727zM9.03 8l-1 4h2.938l1-4H9.031z" clipRule="evenodd" />
+                  </svg>
+                  Generate Cover Letter
+                </>
+              )}
+            </button>
+
+            {/* Detected job chip — shown when a title was found */}
+            {jobContext?.title && (
+              <p className="text-xs text-center truncate popup-chip-role px-1">
+                {jobContext.title}{jobContext.company ? ` · ${jobContext.company}` : ""}
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* Cover letter result — always shown below the button when text exists */}
+        {coverLetterDone && !error && coverLetterText && (
+          <CoverLetterResult text={coverLetterText} filled={coverLetterFilled} />
         )}
       </div>
     </div>

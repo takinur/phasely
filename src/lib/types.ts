@@ -77,6 +77,5 @@ export interface StoredData {
   profile: Profile | null
   resume: StoredResume | null
   settings: ExtensionSettings
-  geminiToken: string | null  // OAuth token, managed by chrome.identity
   presets: ProfilePreset[]
 }
