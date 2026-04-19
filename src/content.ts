@@ -130,7 +130,10 @@ chrome.runtime.onMessage.addListener(
               break
             }
 
-            fillField({ ...target, suggestedValue: value })
+            // isAiField must be false here — fillField skips AI fields by design
+            // (they normally need generation). We already have the generated value,
+            // so we override the flag to force a direct write.
+            fillField({ ...target, suggestedValue: value, isAiField: false })
             sendResponse({ ok: true })
             break
           }

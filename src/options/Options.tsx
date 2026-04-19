@@ -994,7 +994,7 @@ export function Options() {
         </p>
         {/* Github Link */}
         <div className="text-center">
-          Crafted with care, Source code on<a
+          Crafted with care, Source code on <a
             href="https://github.com/takinur/phasely"
             target="_blank"
             rel="noopener noreferrer"
