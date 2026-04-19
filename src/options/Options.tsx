@@ -139,11 +139,9 @@ Results-driven software engineer with 7 years of experience building scalable we
 function ProfileSection({
   profile,
   onProfileSaved,
-  onWiped,
 }: {
   profile: Profile | null;
   onProfileSaved: (p: Profile) => void;
-  onWiped: () => void;
 }) {
   // Initialise to existing profile markdown if available, otherwise show the template.
   const [markdown, setMarkdown] = useState(() =>
@@ -154,9 +152,6 @@ function ProfileSection({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const injectionHits = useMemo(() => detectInjection(markdown), [markdown]);
-  const [confirmingWipe, setConfirmingWipe] = useState(false);
-  const [wiping, setWiping] = useState(false);
-  const [wipeError, setWipeError] = useState<string | null>(null);
 
   // When a profile loads async after mount, populate the textarea once.
   useEffect(() => {
@@ -200,25 +195,6 @@ function ProfileSection({
     URL.revokeObjectURL(url);
   }, [profile]);
 
-  const handleWipe = useCallback(async () => {
-    if (!confirmingWipe) {
-      setWipeError(null);
-      setConfirmingWipe(true);
-      return;
-    }
-    setWiping(true);
-    setWipeError(null);
-    try {
-      const res = await sendMsg<{ ok: boolean; error?: string }>({ type: "WIPE_DATA" });
-      if (!res.ok) throw new Error(res.error ?? "Wipe failed");
-      onWiped();
-    } catch (err) {
-      setWipeError(String(err));
-    } finally {
-      setWiping(false);
-      setConfirmingWipe(false);
-    }
-  }, [confirmingWipe, onWiped]);
 
   return (
     <section className="options-panel rounded-lg border border-gray-200 p-6">
@@ -245,45 +221,21 @@ function ProfileSection({
             <ProfileField label="Email" value={profile.email} />
             <ProfileField label="Phone" value={profile.phone} />
             <ProfileField label="Title" value={profile.currentTitle} />
-            <ProfileField label="Company" value={profile.currentCompany} />
             <ProfileField label="Location" value={profile.location} />
             <ProfileField label="Experience" value={`${profile.yearsExperience} yrs`} />
-            <ProfileField label="Work Auth" value={profile.workAuth} />
-            <ProfileField label="Remote" value={profile.remotePreference} />
-            {profile.linkedin && (
-              <div className="col-span-2">
-                <dt className="options-profile-label inline">LinkedIn: </dt>
-                <dd className="inline">
-                  <a
-                    href={profile.linkedin}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="options-profile-link text-indigo-600 hover:underline"
-                  >
-                    {profile.linkedin}
-                  </a>
-                </dd>
-              </div>
-            )}
           </dl>
           {profile.skills.length > 0 && (
             <div className="mt-2">
               <span className="options-profile-label text-xs">Skills: </span>
-              <span className="options-profile-skills text-xs">{profile.skills.join(", ")}</span>
+              <span className="options-profile-skills text-xs">{profile.skills.slice(0, 6).join(", ")}{profile.skills.length > 6 ? ` +${profile.skills.length - 6} more` : ""}</span>
             </div>
           )}
         </div>
       )}
 
       {/* AI generation hint */}
-      <div className="options-hint mb-4 rounded-md bg-indigo-50 border border-indigo-100 px-4 py-3 text-xs text-indigo-800 space-y-2">
-        <p>
-          <span className="font-semibold">Don't want to write this by hand?</span> Drop your CV into ChatGPT or Gemini and use this prompt:
-        </p>
-        <blockquote className="italic border-l-2 border-indigo-300 pl-3 text-indigo-700">
-          "Convert this CV into a Phasely profile.md. Use YAML front-matter (between --- delimiters). Required fields: firstName, lastName, email. Include if present: phone, location, currentTitle, currentCompany, yearsExperience, skills (YAML list), education (YAML list with degree / institution / year), workAuth, noticePeriod, salaryExpectation, willingToRelocate, remotePreference. After the closing ---, add a brief markdown summary and experience section."
-        </blockquote>
-        <p>Paste the result here and click <span className="font-semibold">Save Profile</span>. The live preview below the editor will tell you if anything is missing before you save.</p>
+      <div className="options-hint mb-4 rounded-md bg-indigo-50 border border-indigo-100 px-3 py-2.5 text-xs text-indigo-800">
+        <span className="font-semibold">Tip:</span> Drop your CV into ChatGPT or Gemini and ask it to <span className="italic">"convert this CV into a Phasely profile.md with YAML front-matter"</span> — then paste the result here.
       </div>
 
       {/* Paste area */}
@@ -341,47 +293,6 @@ function ProfileSection({
         </button>
       </div>
 
-      {/* Danger zone — wipe all data */}
-      <div className="mt-6 pt-5 border-t border-red-100">
-        <p className="options-profile-help text-xs text-gray-400 mb-3">
-          Permanently delete all Phasely data — profile, resume, encryption key, and settings. Cannot be undone.
-        </p>
-
-        {wipeError && <div className="mb-2"><Alert type="error">{wipeError}</Alert></div>}
-
-        {confirmingWipe && (
-          <div className="mb-2">
-            <Alert type="warning">
-              This will permanently delete everything. There is no recovery. Click again to confirm.
-            </Alert>
-          </div>
-        )}
-
-        <div className="flex gap-2">
-          <button
-            onClick={handleWipe}
-            disabled={wiping}
-            className={[
-              "rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
-              confirmingWipe
-                ? "bg-red-600 text-white hover:bg-red-700"
-                : "border border-red-300 text-red-600 hover:border-red-400 hover:bg-red-50",
-              wiping ? "opacity-50 cursor-not-allowed" : "",
-            ].join(" ")}
-          >
-            {wiping ? "Wiping…" : confirmingWipe ? "Confirm — Wipe Everything" : "Wipe All Data"}
-          </button>
-
-          {confirmingWipe && !wiping && (
-            <button
-              onClick={() => setConfirmingWipe(false)}
-              className="rounded-md px-3 py-1.5 text-xs font-medium border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors"
-            >
-              Cancel
-            </button>
-          )}
-        </div>
-      </div>
     </section>
   );
 }
@@ -589,101 +500,85 @@ function ResumeSection({
 // ---------------------------------------------------------------------------
 
 function SettingsSection({
-  settings,
-  onSettingsSaved,
+  isDarkMode,
+  onDarkModeChange,
+  onWiped,
 }: {
-  settings: ExtensionSettings;
-  onSettingsSaved: (s: ExtensionSettings) => void;
+  isDarkMode: boolean;
+  onDarkModeChange: (v: boolean) => void;
+  onWiped: () => void;
 }) {
-  const [draft, setDraft] = useState<ExtensionSettings>(settings);
-  const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const [saveSuccess, setSaveSuccess] = useState(false);
+  const [wiping, setWiping] = useState(false);
+  const [wipeError, setWipeError] = useState<string | null>(null);
 
-  const handleSave = useCallback(async () => {
-    setSaving(true);
-    setSaveError(null);
-    setSaveSuccess(false);
+  const handleWipe = useCallback(async () => {
+    setWiping(true);
+    setWipeError(null);
     try {
-      const res = await sendMsg<{ ok: boolean; settings: ExtensionSettings; error?: string }>({
-        type: "SAVE_SETTINGS",
-        settings: draft,
-      });
-      if (!res.ok) throw new Error(res.error ?? "Save failed");
-      onSettingsSaved(res.settings);
-      setSaveSuccess(true);
+      const res = await sendMsg<{ ok: boolean; error?: string }>({ type: "WIPE_DATA" });
+      if (!res.ok) throw new Error(res.error ?? "Wipe failed");
+      onWiped();
     } catch (err) {
-      setSaveError(String(err));
+      setWipeError(String(err));
     } finally {
-      setSaving(false);
+      setWiping(false);
     }
-  }, [draft, onSettingsSaved]);
-
-  const update = useCallback(
-    <K extends keyof ExtensionSettings>(key: K, value: ExtensionSettings[K]) => {
-      setSaveSuccess(false);
-      setDraft((prev) => ({ ...prev, [key]: value }));
-    },
-    [],
-  );
+  }, [onWiped]);
 
   return (
     <section className="options-panel rounded-lg border border-gray-200 p-6">
-      <SectionHeader
-        title="Extension Settings"
-        subtitle="Control how Phasely fills and submits applications."
-      />
+      <SectionHeader title="Settings" />
 
-      <div className="space-y-5">
-        {/* Confirm before submit toggle */}
-        <div className="flex items-start gap-3">
-          <input
-            id="confirmBeforeSubmit"
-            type="checkbox"
-            checked={draft.confirmBeforeSubmit}
-            onChange={(e) => update("confirmBeforeSubmit", e.target.checked)}
-            className="mt-0.5 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
-          />
-          <label htmlFor="confirmBeforeSubmit" className="text-sm text-gray-700 cursor-pointer">
-            <span className="font-medium">Confirm before submitting</span>
-            <p className="text-xs text-gray-400 mt-0.5">
-              Show a confirmation dialog before Phasely clicks the Submit button. Recommended — keeps you in control.
-            </p>
-          </label>
+      <div className="space-y-4">
+        {/* Dark mode slider */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2 text-sm text-gray-700">
+            {/* Sun icon */}
+            <svg className="w-4 h-4 text-amber-400" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+              <path fillRule="evenodd" d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z" clipRule="evenodd" />
+            </svg>
+            <span className="font-medium">Dark mode</span>
+            {/* Moon icon */}
+            <svg className="w-4 h-4 text-indigo-400" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+              <path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z" />
+            </svg>
+          </div>
+          {/* Slider toggle */}
+          <button
+            role="switch"
+            aria-checked={isDarkMode}
+            onClick={() => onDarkModeChange(!isDarkMode)}
+            className={[
+              "relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2",
+              isDarkMode ? "bg-indigo-600" : "bg-gray-200",
+            ].join(" ")}
+          >
+            <span
+              className={[
+                "inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform",
+                isDarkMode ? "translate-x-6" : "translate-x-1",
+              ].join(" ")}
+            />
+          </button>
         </div>
 
-        {/* Auto-submit toggle */}
-        <div className="flex items-start gap-3">
-          <input
-            id="autoSubmit"
-            type="checkbox"
-            checked={draft.autoSubmit}
-            onChange={(e) => update("autoSubmit", e.target.checked)}
-            className="mt-0.5 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
-          />
-          <label htmlFor="autoSubmit" className="text-sm text-gray-700 cursor-pointer">
-            <span className="font-medium">Auto-submit after fill</span>
-            <p className="text-xs text-gray-400 mt-0.5">
-              Automatically click Submit after filling all fields. Only takes effect when "Confirm before submitting" is also enabled.
-            </p>
-          </label>
+        {/* Wipe */}
+        <div className="pt-3 border-t border-gray-100">
+          {wipeError && <div className="mb-2"><Alert type="error">{wipeError}</Alert></div>}
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-gray-400">Permanently delete all data — profile, resume, key, and settings.</p>
+            <button
+              onClick={handleWipe}
+              disabled={wiping}
+              className={[
+                "ml-4 shrink-0 rounded-md px-3 py-1.5 text-xs font-medium border border-red-300 text-red-600 hover:border-red-400 hover:bg-red-50 transition-colors",
+                wiping ? "opacity-50 cursor-not-allowed" : "",
+              ].join(" ")}
+            >
+              {wiping ? "Wiping…" : "Wipe All Data"}
+            </button>
+          </div>
         </div>
-
-        {saveError && <Alert type="error">{saveError}</Alert>}
-        {saveSuccess && <Alert type="success">Settings saved.</Alert>}
-
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          className={[
-            "options-btn-primary rounded-md px-4 py-2 text-sm font-medium transition-colors",
-            !saving
-              ? "bg-indigo-600 text-white hover:bg-indigo-700"
-              : "bg-gray-100 text-gray-400 cursor-not-allowed",
-          ].join(" ")}
-        >
-          {saving ? "Saving…" : "Save Settings"}
-        </button>
       </div>
     </section>
   );
@@ -1034,13 +929,7 @@ export function Options() {
               <p className="options-brand-sub text-xs text-gray-400">Settings</p>
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => setIsDarkMode((prev) => !prev)}
-              className="options-btn-secondary rounded-md border border-gray-300 px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors"
-            >
-              {isDarkMode ? "Light mode" : "Dark mode"}
-            </button>
+          <div className="flex items-center gap-2">
             <span
               className={[
                 "inline-block w-2 h-2 rounded-full",
@@ -1061,28 +950,18 @@ export function Options() {
         )}
 
         {/* Introduction */}
-        <div className="options-hero rounded-xl border border-indigo-100 bg-linear-to-br from-indigo-50 to-white dark:bg-gray-800 px-6 py-5">
-          <h2 className="options-hero-title text-sm font-semibold text-indigo-900 mb-1.5">Fill every form. Once.</h2>
-          <p className="text-sm text-gray-600 leading-relaxed">
-            Write your profile once. Phasely handles the copy-paste — Workday, Greenhouse, Lever, iCIMS, and more,
-            all filled in one click. Everything stays encrypted on your device. No accounts. No servers. No nonsense.
+        <div className="options-hero rounded-xl border border-indigo-100 bg-linear-to-br from-indigo-50 to-white dark:bg-gray-800 px-5 py-4 flex items-center justify-between gap-4">
+          <p className="text-sm text-gray-600">
+            Write your profile once — Phasely fills Workday, Greenhouse, Lever, iCIMS and more in one click. Encrypted locally, zero telemetry.
           </p>
-          <div className="mt-3 flex flex-wrap gap-3 text-xs text-gray-500">
+          <div className="flex shrink-0 gap-2 text-xs text-gray-400">
             <span className="flex items-center gap-1">
-              <svg className="w-3.5 h-3.5 text-green-500" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
-              Encrypted on-device
+              <svg className="w-3 h-3 text-green-500" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" /></svg>
+              Encrypted
             </span>
             <span className="flex items-center gap-1">
-              <svg className="w-3.5 h-3.5 text-green-500" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
-              Zero telemetry
-            </span>
-            <span className="flex items-center gap-1">
-              <svg className="w-3.5 h-3.5 text-green-500" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
+              <svg className="w-3 h-3 text-green-500" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
               No servers
-            </span>
-            <span className="flex items-center gap-1">
-              <svg className="w-3.5 h-3.5 text-green-500" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
-              Open source
             </span>
           </div>
         </div>
@@ -1090,7 +969,6 @@ export function Options() {
         <ProfileSection
           profile={profile}
           onProfileSaved={setProfile}
-          onWiped={handleWiped}
         />
 
         <ResumeSection
@@ -1104,8 +982,9 @@ export function Options() {
         />
 
         <SettingsSection
-          settings={settings}
-          onSettingsSaved={setSettings}
+          isDarkMode={isDarkMode}
+          onDarkModeChange={setIsDarkMode}
+          onWiped={handleWiped}
         />
 
         <UpcomingSection />
@@ -1115,13 +994,13 @@ export function Options() {
         </p>
         {/* Github Link */}
         <div className="text-center">
-          crafted with care <a
-            href="https://github.com/phasely/phasely"
+          Crafted with care, Source code on<a
+            href="https://github.com/takinur/phasely"
             target="_blank"
             rel="noopener noreferrer"
             className="options-link text-sm text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 dark:hover:text-indigo-300"
           >
-           Source code on GitHub
+            GitHub
           </a>
         </div>
 
