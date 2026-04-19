@@ -1,13 +1,14 @@
 {
     "manifest_version": 3,
     "name": "Phasely",
+    "key": "ssh key", 
     "version": "1.0.2",
     "description": "Stop re-typing your CV into job forms. Phasely fills applications in one click — free, open-source, and fully private.",
     "permissions": ["activeTab", "tabs", "scripting", "storage", "identity"],
     "host_permissions": ["https://generativelanguage.googleapis.com/*"],
     "oauth2": {
-        "client_id": "GOOGLE_OAUTH_CLIENT_ID.apps.googleusercontent.com",
-        "scopes": ["https://www.googleapis.com/auth/generative-language"]
+        "client_id": "urclientid.apps.googleusercontent.com",
+        "scopes": ["https://www.googleapis.com/auth/cloud-platform"]
     },
     "action": {
         "default_popup": "src/popup.html",

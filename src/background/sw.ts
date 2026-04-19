@@ -388,6 +388,12 @@ async function handleSaveResume(
  * Returns { ok: true, token } on success, { ok: false, error } on failure.
  */
 async function handleAuthGoogle(): Promise<Response<{ token: string }>> {
+  // Keep the service worker alive with a recurring alarm while we wait for the
+  // user to complete the interactive OAuth popup. Without this, MV3 may
+  // terminate the SW after ~30 s of perceived inactivity, losing the callback.
+  const KEEPALIVE_ALARM = "phasely-auth-keepalive";
+  await chrome.alarms.create(KEEPALIVE_ALARM, { periodInMinutes: 0.4 });
+
   try {
     const token = await new Promise<string>((resolve, reject) => {
       try {
@@ -414,13 +420,16 @@ async function handleAuthGoogle(): Promise<Response<{ token: string }>> {
 
     debug("AUTH_GOOGLE: token acquired via getAuthToken");
 
-    // Persist the token encrypted so it is consistent with the rest of stored data.
+    // Persist the token so the Gemini client can retrieve it when needed.
     await setGeminiToken(token);
 
     return { ok: true, token };
   } catch (err) {
     console.error("[Phasely] AUTH_GOOGLE failed:", err);
     return { ok: false, error: String(err) };
+  } finally {
+    // Always clear the keepalive alarm once auth resolves or rejects.
+    await chrome.alarms.clear(KEEPALIVE_ALARM);
   }
 }
 

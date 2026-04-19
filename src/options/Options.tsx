@@ -15,7 +15,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ExtensionSettings, Profile, StoredResume } from "@/lib/types";
 import { profileToMarkdown, detectInjection, parseProfile, ProfileParseError } from "@/lib/profile";
 import { DEFAULT_SETTINGS } from "@/lib/defaults";
-import logoIcon from "@/assets/phasely-icon.svg";
+import logoIcon from "@/assets/logo_phasely.png";
 
 // ---------------------------------------------------------------------------
 // Chrome message helper
@@ -86,49 +86,6 @@ function Alert({
   );
 }
 
-function Toggle({
-  label,
-  description,
-  checked,
-  onChange,
-}: {
-  label: string;
-  description?: string;
-  checked: boolean;
-  onChange: (v: boolean) => void;
-}) {
-  return (
-    <label className="flex items-start gap-3 cursor-pointer">
-      <div className="relative mt-0.5">
-        <input
-          type="checkbox"
-          className="sr-only"
-          checked={checked}
-          onChange={(e) => onChange(e.target.checked)}
-        />
-        <div
-          className={[
-            "w-10 h-5 rounded-full transition-colors",
-            checked ? "bg-indigo-600" : "bg-gray-300",
-          ].join(" ")}
-        />
-        <div
-          className={[
-            "absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform",
-            checked ? "translate-x-5" : "translate-x-0.5",
-          ].join(" ")}
-        />
-      </div>
-      <div>
-        <span className="text-sm font-medium text-gray-700">{label}</span>
-        {description && (
-          <p className="text-xs text-gray-500 mt-0.5">{description}</p>
-        )}
-      </div>
-    </label>
-  );
-}
-
 // ---------------------------------------------------------------------------
 // Profile section
 // ---------------------------------------------------------------------------
@@ -182,9 +139,11 @@ Results-driven software engineer with 7 years of experience building scalable we
 function ProfileSection({
   profile,
   onProfileSaved,
+  onWiped,
 }: {
   profile: Profile | null;
   onProfileSaved: (p: Profile) => void;
+  onWiped: () => void;
 }) {
   // Initialise to existing profile markdown if available, otherwise show the template.
   const [markdown, setMarkdown] = useState(() =>
@@ -195,6 +154,9 @@ function ProfileSection({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const injectionHits = useMemo(() => detectInjection(markdown), [markdown]);
+  const [confirmingWipe, setConfirmingWipe] = useState(false);
+  const [wiping, setWiping] = useState(false);
+  const [wipeError, setWipeError] = useState<string | null>(null);
 
   // When a profile loads async after mount, populate the textarea once.
   useEffect(() => {
@@ -237,6 +199,26 @@ function ProfileSection({
     a.click();
     URL.revokeObjectURL(url);
   }, [profile]);
+
+  const handleWipe = useCallback(async () => {
+    if (!confirmingWipe) {
+      setWipeError(null);
+      setConfirmingWipe(true);
+      return;
+    }
+    setWiping(true);
+    setWipeError(null);
+    try {
+      const res = await sendMsg<{ ok: boolean; error?: string }>({ type: "WIPE_DATA" });
+      if (!res.ok) throw new Error(res.error ?? "Wipe failed");
+      onWiped();
+    } catch (err) {
+      setWipeError(String(err));
+    } finally {
+      setWiping(false);
+      setConfirmingWipe(false);
+    }
+  }, [confirmingWipe, onWiped]);
 
   return (
     <section className="rounded-lg border border-gray-200 p-6">
@@ -356,6 +338,48 @@ function ProfileSection({
           {saving ? "Saving…" : profile ? "Update Profile" : "Save Profile"}
         </button>
       </div>
+
+      {/* Danger zone — wipe all data */}
+      <div className="mt-6 pt-5 border-t border-red-100">
+        <p className="text-xs text-gray-400 mb-3">
+          Permanently delete all Phasely data — profile, resume, encryption key, and settings. Cannot be undone.
+        </p>
+
+        {wipeError && <div className="mb-2"><Alert type="error">{wipeError}</Alert></div>}
+
+        {confirmingWipe && (
+          <div className="mb-2">
+            <Alert type="warning">
+              This will permanently delete everything. There is no recovery. Click again to confirm.
+            </Alert>
+          </div>
+        )}
+
+        <div className="flex gap-2">
+          <button
+            onClick={handleWipe}
+            disabled={wiping}
+            className={[
+              "rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
+              confirmingWipe
+                ? "bg-red-600 text-white hover:bg-red-700"
+                : "border border-red-300 text-red-600 hover:border-red-400 hover:bg-red-50",
+              wiping ? "opacity-50 cursor-not-allowed" : "",
+            ].join(" ")}
+          >
+            {wiping ? "Wiping…" : confirmingWipe ? "Confirm — Wipe Everything" : "Wipe All Data"}
+          </button>
+
+          {confirmingWipe && !wiping && (
+            <button
+              onClick={() => setConfirmingWipe(false)}
+              className="rounded-md px-3 py-1.5 text-xs font-medium border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors"
+            >
+              Cancel
+            </button>
+          )}
+        </div>
+      </div>
     </section>
   );
 }
@@ -374,25 +398,26 @@ function ProfileField({ label, value }: { label: string; value: string }) {
 // Live YAML validator — shown below the textarea as the user types
 // ---------------------------------------------------------------------------
 
+type ValidationState =
+  | { status: "idle" }
+  | { status: "valid"; firstName: string; lastName: string; email: string; skillsCount: number; educationCount: number }
+  | { status: "invalid"; errors: string[] };
+
 /**
  * Parses the textarea content in real time (debounced 400 ms) and shows either
  * a green "looks good" summary or a red list of specific errors — so users fix
  * problems before clicking Save, not after.
  */
 function ProfileValidator({ markdown }: { markdown: string }) {
-  type ValidationState =
-    | { status: "idle" }
-    | { status: "valid"; firstName: string; lastName: string; email: string; skillsCount: number; educationCount: number }
-    | { status: "invalid"; errors: string[] };
 
   const [state, setState] = useState<ValidationState>({ status: "idle" });
 
   useEffect(() => {
-    if (!markdown.trim()) {
-      setState({ status: "idle" });
-      return;
-    }
     const timer = setTimeout(() => {
+      if (!markdown.trim()) {
+        setState({ status: "idle" });
+        return;
+      }
       try {
         const profile = parseProfile(markdown);
         setState({
@@ -698,31 +723,16 @@ function SettingsSection({
           {modelsError && <Alert type="error">{modelsError}</Alert>}
         </div>
 
-        {/* Auto-submit after fill */}
-        <Toggle
-          label="Auto-submit after fill"
-          description="Automatically click the submit button after filling all fields. Requires 'Confirm before submitting' to be on for safety."
-          checked={draft.autoSubmit}
-          onChange={(v) => update("autoSubmit", v)}
-        />
-
-        {/* Confirm before submit */}
-        <Toggle
-          label="Confirm before submitting"
-          description="Show a confirmation dialog before auto-submitting the application."
-          checked={draft.confirmBeforeSubmit}
-          onChange={(v) => update("confirmBeforeSubmit", v)}
-        />
-
         {saveError && <Alert type="error">{saveError}</Alert>}
         {saveSuccess && <Alert type="success">Settings saved.</Alert>}
 
         <button
           onClick={handleSave}
-          disabled={saving}
+          disabled={saving || !oauthEnabled}
+          title={!oauthEnabled ? "Sign in with Google first" : undefined}
           className={[
             "rounded-md px-4 py-2 text-sm font-medium transition-colors",
-            !saving
+            !saving && oauthEnabled
               ? "bg-indigo-600 text-white hover:bg-indigo-700"
               : "bg-gray-100 text-gray-400 cursor-not-allowed",
           ].join(" ")}
@@ -752,9 +762,12 @@ function AuthSection({
     setAuthing(true);
     setAuthError(null);
     try {
-      const res = await sendMsg<{ ok: boolean; token?: string; error?: string }>({
-        type: "AUTH_GOOGLE",
-      });
+      // AUTH_GOOGLE opens an interactive browser window — give the user
+      // up to 5 minutes to read and accept the consent screen.
+      const res = await sendMsg<{ ok: boolean; token?: string; error?: string }>(
+        { type: "AUTH_GOOGLE" },
+        300_000,
+      );
       if (!res.ok) throw new Error(res.error ?? "Auth failed");
       onAuthed();
     } catch (err) {
@@ -875,110 +888,6 @@ function UpcomingSection() {
           </li>
         ))}
       </ul>
-    </section>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Danger zone
-// ---------------------------------------------------------------------------
-
-function DangerZone({ onWiped }: { onWiped: () => void }) {
-  const [confirming, setConfirming] = useState(false);
-  const [wiping, setWiping] = useState(false);
-  const [wipeError, setWipeError] = useState<string | null>(null);
-  const [wipeSuccess, setWipeSuccess] = useState(false);
-  const [cooldownSeconds, setCooldownSeconds] = useState(0);
-
-  useEffect(() => {
-    if (cooldownSeconds <= 0) return;
-    const timer = window.setInterval(() => {
-      setCooldownSeconds((prev) => (prev > 0 ? prev - 1 : 0));
-    }, 1000);
-    return () => window.clearInterval(timer);
-  }, [cooldownSeconds]);
-
-  const handleWipe = useCallback(async () => {
-    if (cooldownSeconds > 0) return;
-    if (!confirming) {
-      setWipeError(null);
-      setWipeSuccess(false);
-      setConfirming(true);
-      return;
-    }
-    setWiping(true);
-    setWipeError(null);
-    setWipeSuccess(false);
-    try {
-      const res = await sendMsg<{ ok: boolean; error?: string }>({ type: "WIPE_DATA" });
-      if (!res.ok) throw new Error(res.error ?? "Wipe failed");
-      onWiped();
-      setConfirming(false);
-      setWipeSuccess(true);
-      setCooldownSeconds(20);
-    } catch (err) {
-      setWipeError(String(err));
-    } finally {
-      setWiping(false);
-    }
-  }, [confirming, cooldownSeconds, onWiped]);
-
-  return (
-    <section className="rounded-lg border border-red-200 p-6">
-      <SectionHeader
-        title="Danger Zone"
-        subtitle="Permanently delete everything — profile, resume, encryption key, settings. Cannot be undone. Export your profile first if you want to keep it."
-      />
-
-      <div className="space-y-3">
-        {wipeError && <Alert type="error">{wipeError}</Alert>}
-        {wipeSuccess && <Alert type="success">All data wiped. Reloading…</Alert>}
-
-        {confirming && (
-          <Alert type="warning">
-            This will permanently delete all Phasely data including the encryption key. There is no recovery.
-            Export your profile first if you need it. Click again to confirm.
-          </Alert>
-        )}
-
-        <div className="flex gap-2">
-          <button
-            onClick={handleWipe}
-            disabled={wiping || cooldownSeconds > 0}
-            className={[
-              "rounded-md px-4 py-2 text-sm font-medium transition-colors",
-              confirming
-                ? "bg-red-600 text-white hover:bg-red-700"
-                : "border border-red-300 text-red-600 hover:border-red-400 hover:bg-red-50",
-              wiping || cooldownSeconds > 0 ? "opacity-50 cursor-not-allowed" : "",
-            ].join(" ")}
-          >
-            {wiping
-              ? "Wiping…"
-              : cooldownSeconds > 0
-                ? `Wipe locked (${cooldownSeconds}s)`
-                : confirming
-                  ? "Confirm — Wipe Everything"
-                  : "Wipe All Data"}
-          </button>
-
-          {confirming && !wiping && (
-            <button
-              onClick={() => {
-                setConfirming(false);
-                setWipeSuccess(false);
-              }}
-              className="rounded-md px-4 py-2 text-sm font-medium border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors"
-            >
-              Cancel
-            </button>
-          )}
-        </div>
-
-        <p className="text-xs text-gray-400">
-          Because everything is local and encrypted, wiping is final — there is no server copy to restore from.
-        </p>
-      </div>
     </section>
   );
 }
@@ -1126,6 +1035,7 @@ export function Options() {
         <ProfileSection
           profile={profile}
           onProfileSaved={setProfile}
+          onWiped={handleWiped}
         />
 
         <ResumeSection
@@ -1144,11 +1054,21 @@ export function Options() {
 
         <UpcomingSection />
 
-        <DangerZone onWiped={handleWiped} />
-
         <p className="text-xs text-gray-400 text-center pb-4">
           Phasely v1.0.2 — open source · encrypted locally · zero telemetry
         </p>
+        {/* Github Link */}
+        <div className="text-center">
+          crafted with care <a
+            href="https://github.com/phasely/phasely"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sm text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 dark:hover:text-indigo-300"
+          >
+           Source code on GitHub
+          </a>
+        </div>
+
       </main>
     </div>
   );
