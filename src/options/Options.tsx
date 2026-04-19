@@ -728,10 +728,11 @@ function SettingsSection({
 
         <button
           onClick={handleSave}
-          disabled={saving}
+          disabled={saving || !oauthEnabled}
+          title={!oauthEnabled ? "Sign in with Google first" : undefined}
           className={[
             "rounded-md px-4 py-2 text-sm font-medium transition-colors",
-            !saving
+            !saving && oauthEnabled
               ? "bg-indigo-600 text-white hover:bg-indigo-700"
               : "bg-gray-100 text-gray-400 cursor-not-allowed",
           ].join(" ")}
@@ -761,9 +762,12 @@ function AuthSection({
     setAuthing(true);
     setAuthError(null);
     try {
-      const res = await sendMsg<{ ok: boolean; token?: string; error?: string }>({
-        type: "AUTH_GOOGLE",
-      });
+      // AUTH_GOOGLE opens an interactive browser window — give the user
+      // up to 5 minutes to read and accept the consent screen.
+      const res = await sendMsg<{ ok: boolean; token?: string; error?: string }>(
+        { type: "AUTH_GOOGLE" },
+        300_000,
+      );
       if (!res.ok) throw new Error(res.error ?? "Auth failed");
       onAuthed();
     } catch (err) {
