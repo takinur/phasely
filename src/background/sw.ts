@@ -280,7 +280,7 @@ async function handleGenerateCoverLetter(): Promise<Response<Record<never, never
     if (!profile) return { ok: false, error: "No profile saved. Add your profile in Settings first." };
     if (!apiKey) return { ok: false, error: "No Gemini API key saved. Add one in Settings → AI Settings." };
 
-    const model = settings?.geminiModel ?? "gemini-1.5-flash";
+    const model = settings?.geminiModel ?? "gemini-2.5-flash-preview-05-20";
 
     // 2. Get job context from the active tab via the content script.
     const tabResult = await forwardToActiveTab({ type: "DETECT_FIELDS", profile });

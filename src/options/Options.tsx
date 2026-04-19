@@ -591,59 +591,14 @@ function ResumeSection({
 function SettingsSection({
   settings,
   onSettingsSaved,
-  modelsRefreshKey,
 }: {
   settings: ExtensionSettings;
   onSettingsSaved: (s: ExtensionSettings) => void;
-  modelsRefreshKey: number;
 }) {
   const [draft, setDraft] = useState<ExtensionSettings>(settings);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
-  const [availableModels, setAvailableModels] = useState<string[]>([]);
-  const [modelsLoading, setModelsLoading] = useState(true);
-  const [apiKeySet, setApiKeySet] = useState(false);
-  const [modelsError, setModelsError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    (async () => {
-      try {
-        const res = await sendMsg<{
-          ok: boolean;
-          apiKeySet: boolean;
-          models: string[];
-          error?: string;
-        }>({ type: "GET_GEMINI_MODELS" });
-        if (!res.ok) throw new Error(res.error ?? "Failed to load Gemini models");
-        if (cancelled) return;
-
-        const models = res.models ?? [];
-        setApiKeySet(res.apiKeySet);
-        setAvailableModels(models);
-        setModelsError(null);
-
-        // Use functional setDraft to read current geminiModel without adding it
-        // as a dependency — avoids re-fetching models on every model change.
-        if (res.apiKeySet && models.length > 0) {
-          setDraft((prev) => ({
-            ...prev,
-            geminiModel: models.includes(prev.geminiModel) ? prev.geminiModel : models[0],
-          }));
-        }
-      } catch (err) {
-        if (!cancelled) setModelsError(String(err));
-      } finally {
-        if (!cancelled) setModelsLoading(false);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [modelsRefreshKey]);
 
   const handleSave = useCallback(async () => {
     setSaving(true);
@@ -676,7 +631,7 @@ function SettingsSection({
     <section className="options-panel rounded-lg border border-gray-200 p-6">
       <SectionHeader
         title="Extension Settings"
-        subtitle="Control how Phasely fills and submits applications. Submit settings take effect immediately — no Google sign-in required."
+        subtitle="Control how Phasely fills and submits applications."
       />
 
       <div className="space-y-5">
@@ -714,44 +669,6 @@ function SettingsSection({
           </label>
         </div>
 
-        {/* Gemini model picker — only relevant when API key is saved */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1.5">
-            Gemini model <span className="text-xs font-normal text-gray-400">(AI features)</span>
-          </label>
-          <select
-            value={draft.geminiModel}
-            onChange={(e) =>
-              update("geminiModel", e.target.value as ExtensionSettings["geminiModel"])
-            }
-            disabled={!apiKeySet || modelsLoading}
-            className={[
-              "options-select rounded-md border px-3 py-1.5 text-sm focus:outline-none focus:ring-2 transition-colors cursor-pointer disabled:cursor-not-allowed",
-              !apiKeySet
-                ? "border-gray-200 bg-gray-50 text-gray-400 focus:ring-gray-300"
-                : "border-gray-300 text-gray-700 focus:ring-indigo-500",
-            ].join(" ")}
-          >
-            {availableModels.length > 0 ? (
-              availableModels.map((model) => (
-                <option key={model} value={model}>
-                  {model}
-                </option>
-              ))
-            ) : (
-              <option value={draft.geminiModel}>{draft.geminiModel}</option>
-            )}
-          </select>
-          <p className="text-xs text-gray-400 mt-1">
-            {!apiKeySet
-              ? "Save your Gemini API key in the AI Settings section above to enable model selection."
-              : modelsLoading
-                ? "Loading available Gemini models…"
-                : "Used for AI-written fields (cover letter, open questions)."}
-          </p>
-          {modelsError && <Alert type="error">{modelsError}</Alert>}
-        </div>
-
         {saveError && <Alert type="error">{saveError}</Alert>}
         {saveSuccess && <Alert type="success">Settings saved.</Alert>}
 
@@ -776,30 +693,54 @@ function SettingsSection({
 // AI Settings section (Gemini API key)
 // ---------------------------------------------------------------------------
 
-function AiSettingsSection({ onKeySaved }: { onKeySaved: () => void }) {
+function AiSettingsSection({
+  settings,
+  onSettingsSaved,
+}: {
+  settings: ExtensionSettings;
+  onSettingsSaved: (s: ExtensionSettings) => void;
+}) {
   const [apiKey, setApiKey] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [keyAlreadySaved, setKeyAlreadySaved] = useState(false);
 
-  // Check on mount whether a key is already stored.
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await sendMsg<{ ok: boolean; apiKeySet: boolean; models: string[] }>(
-          { type: "GET_GEMINI_MODELS" },
-        );
-        if (!cancelled && res.ok) setKeyAlreadySaved(res.apiKeySet);
-      } catch {
-        // Ignore — treat as no key stored.
+  // Model list state
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [modelsLoading, setModelsLoading] = useState(false);
+  const [modelsError, setModelsError] = useState<string | null>(null);
+  const [selectedModel, setSelectedModel] = useState(settings.geminiModel);
+  const [modelSaving, setModelSaving] = useState(false);
+  const [modelSaveSuccess, setModelSaveSuccess] = useState(false);
+
+  const fetchModels = useCallback(async () => {
+    setModelsLoading(true);
+    setModelsError(null);
+    try {
+      const res = await sendMsg<{ ok: boolean; apiKeySet: boolean; models: string[]; error?: string }>(
+        { type: "GET_GEMINI_MODELS" },
+      );
+      if (!res.ok) throw new Error(res.error ?? "Failed to load models");
+      setKeyAlreadySaved(res.apiKeySet);
+      const models = res.models ?? [];
+      setAvailableModels(models);
+      if (models.length > 0) {
+        setSelectedModel((prev) => models.includes(prev) ? prev : models[0]);
       }
-    })();
-    return () => { cancelled = true; };
+    } catch (err) {
+      setModelsError(String(err));
+    } finally {
+      setModelsLoading(false);
+    }
   }, []);
 
-  const handleSave = useCallback(async () => {
+  // Load key status + model list on mount.
+  useEffect(() => {
+    fetchModels();
+  }, [fetchModels]);
+
+  const handleSaveKey = useCallback(async () => {
     const trimmed = apiKey.trim();
     if (!trimmed) return;
     setSaving(true);
@@ -812,25 +753,45 @@ function AiSettingsSection({ onKeySaved }: { onKeySaved: () => void }) {
       });
       if (!res.ok) throw new Error(res.error ?? "Save failed");
       setSaveSuccess(true);
-      setKeyAlreadySaved(true);
       setApiKey("");
-      onKeySaved();
+      // Re-fetch models with the new key.
+      await fetchModels();
     } catch (err) {
       setSaveError(String(err));
     } finally {
       setSaving(false);
     }
-  }, [apiKey, onKeySaved]);
+  }, [apiKey, fetchModels]);
+
+  const handleSaveModel = useCallback(async (model: string) => {
+    setModelSaving(true);
+    setModelSaveSuccess(false);
+    try {
+      const updated: ExtensionSettings = { ...settings, geminiModel: model };
+      const res = await sendMsg<{ ok: boolean; settings: ExtensionSettings; error?: string }>({
+        type: "SAVE_SETTINGS",
+        settings: updated,
+      });
+      if (!res.ok) throw new Error(res.error ?? "Save failed");
+      onSettingsSaved(res.settings);
+      setModelSaveSuccess(true);
+      setTimeout(() => setModelSaveSuccess(false), 2000);
+    } catch {
+      // Silently revert — model save errors are non-critical
+    } finally {
+      setModelSaving(false);
+    }
+  }, [settings, onSettingsSaved]);
 
   return (
     <section className="options-panel rounded-lg border border-gray-200 p-6">
       <SectionHeader
         title="AI Settings"
-        subtitle="Enter your Gemini API key to enable AI-powered cover letter and field generation. Get a free key at aistudio.google.com."
+        subtitle="Gemini API key for AI-powered cover letters and open-text field generation."
       />
 
-      <div className="space-y-3">
-        {/* Show saved-key indicator when a key is already stored */}
+      <div className="space-y-4">
+        {/* Key saved indicator */}
         {keyAlreadySaved && !saveSuccess && (
           <div className="flex items-center gap-2 rounded-md bg-green-50 border border-green-200 px-3 py-2 text-xs text-green-800">
             <svg className="w-3.5 h-3.5 shrink-0 text-green-600" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
@@ -840,64 +801,128 @@ function AiSettingsSection({ onKeySaved }: { onKeySaved: () => void }) {
           </div>
         )}
 
+        {/* API key input */}
         <div>
           <label htmlFor="geminiApiKey" className="block text-sm font-medium text-gray-700 mb-1.5">
             {keyAlreadySaved ? "Replace Gemini API key" : "Gemini API key"}
           </label>
-          <input
-            id="geminiApiKey"
-            type="password"
-            value={apiKey}
-            onChange={(e) => {
-              setApiKey(e.target.value);
-              setSaveSuccess(false);
-              setSaveError(null);
-            }}
-            placeholder="AIza…"
-            autoComplete="off"
-            spellCheck={false}
-            className="options-input w-full rounded-md border border-gray-300 px-3 py-2 text-sm font-mono text-gray-700 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-          />
+          <div className="flex gap-2">
+            <input
+              id="geminiApiKey"
+              type="password"
+              value={apiKey}
+              onChange={(e) => {
+                setApiKey(e.target.value);
+                setSaveSuccess(false);
+                setSaveError(null);
+              }}
+              onKeyDown={(e) => { if (e.key === "Enter") handleSaveKey(); }}
+              placeholder="AIza…"
+              autoComplete="off"
+              spellCheck={false}
+              className="options-input flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm font-mono text-gray-700 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+            />
+            <button
+              onClick={handleSaveKey}
+              disabled={!apiKey.trim() || saving}
+              className={[
+                "options-btn-primary rounded-md px-3 py-2 text-sm font-medium transition-colors shrink-0",
+                apiKey.trim() && !saving
+                  ? "bg-indigo-600 text-white hover:bg-indigo-700"
+                  : "bg-gray-100 text-gray-400 cursor-not-allowed",
+              ].join(" ")}
+            >
+              {saving ? "Saving…" : keyAlreadySaved ? "Replace" : "Save"}
+            </button>
+          </div>
+          <p className="text-xs text-gray-400 mt-1.5">
+            Encrypted on-device, never leaves your browser. Get a free key at{" "}
+            <a
+              href="https://aistudio.google.com/app/apikey"
+              target="_blank"
+              rel="noreferrer"
+              className="text-indigo-600 hover:underline"
+            >
+              aistudio.google.com
+            </a>
+            .
+          </p>
         </div>
 
-        <p className="text-xs text-gray-400">
-          Your key is encrypted on-device and never leaves your browser.
-          Get a free key at{" "}
-          <a
-            href="https://aistudio.google.com/app/apikey"
-            target="_blank"
-            rel="noreferrer"
-            className="text-indigo-600 hover:underline"
-          >
-            aistudio.google.com
-          </a>
-          . Form filling works without a key — this only unlocks AI-generated fields.
-        </p>
-
         {saveError && <Alert type="error">{saveError}</Alert>}
-        {saveSuccess && (
-          <Alert type="success">API key saved and encrypted. AI features are now active.</Alert>
-        )}
+        {saveSuccess && <Alert type="success">API key saved. Loading available models…</Alert>}
 
-        <button
-          onClick={handleSave}
-          disabled={!apiKey.trim() || saving}
-          className={[
-            "options-btn-primary rounded-md px-4 py-2 text-sm font-medium transition-colors",
-            apiKey.trim() && !saving
-              ? "bg-indigo-600 text-white hover:bg-indigo-700"
-              : "bg-gray-100 text-gray-400 cursor-not-allowed",
-          ].join(" ")}
-        >
-          {saving ? "Saving…" : keyAlreadySaved ? "Replace API key" : "Save API key"}
-        </button>
+        {/* Model picker — shown only when a key is set and models have loaded */}
+        {keyAlreadySaved && (
+          <div className="pt-3 border-t border-gray-100">
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">
+              Model
+              {modelsLoading && (
+                <span className="ml-2 text-xs font-normal text-gray-400">Loading…</span>
+              )}
+              {modelSaveSuccess && (
+                <span className="ml-2 text-xs font-normal text-green-600">Saved</span>
+              )}
+              {modelSaving && (
+                <span className="ml-2 text-xs font-normal text-gray-400">Saving…</span>
+              )}
+            </label>
+
+            {modelsError && <Alert type="error">{modelsError}</Alert>}
+
+            {!modelsLoading && !modelsError && availableModels.length > 0 && (
+              <>
+                <select
+                  value={selectedModel}
+                  onChange={(e) => {
+                    const m = e.target.value;
+                    setSelectedModel(m);
+                    handleSaveModel(m);
+                  }}
+                  disabled={modelSaving}
+                  className="options-select w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors cursor-pointer disabled:cursor-not-allowed"
+                >
+                  {availableModels.map((model) => (
+                    <option key={model} value={model}>
+                      {model}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-400 mt-1">
+                  {availableModels.length} model{availableModels.length !== 1 ? "s" : ""} available from your API key. Used for cover letters and open-text fields.
+                </p>
+              </>
+            )}
+
+            {!modelsLoading && !modelsError && availableModels.length === 0 && (
+              <p className="text-xs text-gray-400">
+                No models returned. Check that your API key has Gemini API access.{" "}
+                <button
+                  onClick={fetchModels}
+                  className="text-indigo-600 hover:underline"
+                >
+                  Retry
+                </button>
+              </p>
+            )}
+
+            {!modelsLoading && modelsError && (
+              <button
+                onClick={fetchModels}
+                className="text-xs text-indigo-600 hover:underline"
+              >
+                Retry
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </section>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Premium section (UI only)
+// Upcoming section (UI only)
 // ---------------------------------------------------------------------------
 
 function UpcomingSection() {
@@ -936,7 +961,6 @@ export function Options() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [resumeFilename, setResumeFilename] = useState<string | null>(null);
   const [settings, setSettings] = useState<ExtensionSettings>(DEFAULT_SETTINGS);
-  const [modelsRefreshKey, setModelsRefreshKey] = useState(0);
   const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
     try {
       return window.localStorage.getItem("phasely-options-theme") === "dark";
@@ -982,10 +1006,6 @@ export function Options() {
 
   const handleWiped = useCallback(() => {
     window.location.reload();
-  }, []);
-
-  const handleKeySaved = useCallback(() => {
-    setModelsRefreshKey((k) => k + 1);
   }, []);
 
   if (loading) {
@@ -1078,12 +1098,14 @@ export function Options() {
           onResumeSaved={setResumeFilename}
         />
 
-        <AiSettingsSection onKeySaved={handleKeySaved} />
+        <AiSettingsSection
+          settings={settings}
+          onSettingsSaved={setSettings}
+        />
 
         <SettingsSection
           settings={settings}
           onSettingsSaved={setSettings}
-          modelsRefreshKey={modelsRefreshKey}
         />
 
         <UpcomingSection />
