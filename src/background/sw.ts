@@ -175,11 +175,7 @@ async function handleSubmit(
   }
 }
 
-// CLAUDE_INTEGRATION: dormant — activate in next feature release
-// const anthropic = new Anthropic({ apiKey: settings.claudeApiKey })
-
 function handleGenerateAI(): ErrResponse {
-  // GEMINI_INTEGRATION: dormant — wire GeminiClient here when AI is activated
   return { ok: false, error: "AI not activated" };
 }
 

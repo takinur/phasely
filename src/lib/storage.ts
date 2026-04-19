@@ -349,41 +349,7 @@ export async function setPresets(presets: ProfilePreset[]): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Gemini token helpers (OAuth — kept for backward compatibility / wipe coverage)
-// ---------------------------------------------------------------------------
-
-const KEY_GEMINI_TOKEN = "geminiToken";
-
-/**
- * Encrypt and persist the Google OAuth token.
- */
-export async function setGeminiToken(token: string): Promise<void> {
-  try {
-    const encrypted = await encryptData(token);
-    await storageSet(KEY_GEMINI_TOKEN, encrypted);
-  } catch (err) {
-    console.error("[Phasely] setGeminiToken failed:", err);
-    throw err;
-  }
-}
-
-/**
- * Retrieve and decrypt the Google OAuth token.
- * Returns null if not yet stored.
- */
-export async function getGeminiToken(): Promise<string | null> {
-  try {
-    const stored = await storageGet<{ iv: string; data: string }>(KEY_GEMINI_TOKEN);
-    if (stored === null) return null;
-    return await decryptData(stored.iv, stored.data);
-  } catch (err) {
-    console.error("[Phasely] getGeminiToken failed:", err);
-    throw err;
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Gemini API key helpers (user-supplied key — replaces OAuth for direct API use)
+// Gemini API key helpers (user-supplied key, encrypted on-device)
 // ---------------------------------------------------------------------------
 
 const KEY_GEMINI_API_KEY = "gemini_api_key";
@@ -425,7 +391,7 @@ export async function getGeminiApiKey(): Promise<string | null> {
  * Returns null when the key has never been written.
  *
  * @internal Prefer the typed helpers (getProfile, getResume, getSettings,
- * getGeminiToken). This function skips shape validation — callers must
+ * getGeminiApiKey). This function skips shape validation — callers must
  * validate the returned value themselves.
  */
 export async function get<T extends StoredData[keyof StoredData]>(
@@ -446,7 +412,7 @@ export async function get<T extends StoredData[keyof StoredData]>(
  * Encrypt and persist any top-level StoredData key.
  *
  * @internal Prefer the typed helpers (setProfile, setResume, setSettings,
- * setGeminiToken). This function accepts any serialisable value without
+ * setGeminiApiKey). This function accepts any serialisable value without
  * type checking.
  */
 export async function set<T extends StoredData[keyof StoredData]>(
