@@ -28,8 +28,8 @@ type MsgPayload =
   | { type: "SAVE_RESUME"; base64: string; filename: string; mimeType: string }
   | { type: "GET_SETTINGS" }
   | { type: "SAVE_SETTINGS"; settings: ExtensionSettings }
-  | { type: "AUTH_GOOGLE" }
   | { type: "GET_GEMINI_MODELS" }
+  | { type: "SAVE_GEMINI_API_KEY"; apiKey: string }
   | { type: "WIPE_DATA" };
 
 function sendMsg<T = unknown>(payload: MsgPayload, timeoutMs = 20_000): Promise<T> {
@@ -61,8 +61,8 @@ function sendMsg<T = unknown>(payload: MsgPayload, timeoutMs = 20_000): Promise<
 function SectionHeader({ title, subtitle }: { title: string; subtitle?: string }) {
   return (
     <div className="mb-4">
-      <h2 className="text-base font-semibold text-gray-900">{title}</h2>
-      {subtitle && <p className="text-sm text-gray-500 mt-0.5">{subtitle}</p>}
+      <h2 className="options-heading text-base font-semibold text-gray-900">{title}</h2>
+      {subtitle && <p className="options-subheading text-sm text-gray-500 mt-0.5">{subtitle}</p>}
     </div>
   );
 }
@@ -75,14 +75,14 @@ function Alert({
   children: React.ReactNode;
 }) {
   const classes = {
-    success: "bg-green-50 border-green-200 text-green-800",
-    error: "bg-red-50 border-red-200 text-red-800",
-    info: "bg-indigo-50 border-indigo-200 text-indigo-800",
-    warning: "bg-amber-50 border-amber-200 text-amber-800",
+    success: "options-alert-success bg-green-50 border-green-200 text-green-800",
+    error: "options-alert-error bg-red-50 border-red-200 text-red-800",
+    info: "options-alert-info bg-indigo-50 border-indigo-200 text-indigo-800",
+    warning: "options-alert-warning bg-amber-50 border-amber-200 text-amber-800",
   }[type];
 
   return (
-    <div className={`rounded-md border px-4 py-3 text-sm ${classes}`}>{children}</div>
+    <div className={`options-alert rounded-md border px-4 py-3 text-sm ${classes}`}>{children}</div>
   );
 }
 
@@ -221,22 +221,22 @@ function ProfileSection({
   }, [confirmingWipe, onWiped]);
 
   return (
-    <section className="rounded-lg border border-gray-200 p-6">
+    <section className="options-panel rounded-lg border border-gray-200 p-6">
       <SectionHeader
         title="Profile"
-        subtitle="Fill in the fields below and click Save. Phasely uses this to fill every application — no re-typing required."
+        subtitle="Paste your profile.md here and click Save. Phasely reads this to fill every job application form — required fields are firstName, lastName, and email. Everything else is optional but improves fill accuracy."
       />
 
       {/* Current profile summary */}
       {profile && (
-        <div className="mb-5 rounded-md bg-gray-50 border border-gray-200 p-4">
+        <div className="options-inset options-profile-summary mb-5 rounded-md bg-gray-50 border border-gray-200 p-4">
           <div className="flex items-center justify-between mb-3">
-            <span className="text-sm font-medium text-gray-700">
+            <span className="options-profile-name text-sm font-medium text-gray-700">
               {profile.firstName} {profile.lastName}
             </span>
             <button
               onClick={handleExport}
-              className="text-xs text-indigo-600 hover:text-indigo-800 hover:underline"
+              className="options-profile-export text-xs text-indigo-600 hover:text-indigo-800 hover:underline"
             >
               Export .md
             </button>
@@ -252,13 +252,13 @@ function ProfileSection({
             <ProfileField label="Remote" value={profile.remotePreference} />
             {profile.linkedin && (
               <div className="col-span-2">
-                <dt className="text-gray-400 inline">LinkedIn: </dt>
+                <dt className="options-profile-label inline">LinkedIn: </dt>
                 <dd className="inline">
                   <a
                     href={profile.linkedin}
                     target="_blank"
                     rel="noreferrer"
-                    className="text-indigo-600 hover:underline"
+                    className="options-profile-link text-indigo-600 hover:underline"
                   >
                     {profile.linkedin}
                   </a>
@@ -268,20 +268,22 @@ function ProfileSection({
           </dl>
           {profile.skills.length > 0 && (
             <div className="mt-2">
-              <span className="text-xs text-gray-400">Skills: </span>
-              <span className="text-xs text-gray-600">{profile.skills.join(", ")}</span>
+              <span className="options-profile-label text-xs">Skills: </span>
+              <span className="options-profile-skills text-xs">{profile.skills.join(", ")}</span>
             </div>
           )}
         </div>
       )}
 
       {/* AI generation hint */}
-      <div className="mb-4 rounded-md bg-indigo-50 border border-indigo-100 px-4 py-3 text-xs text-indigo-800">
-        <span className="font-semibold">Don't want to write this by hand?</span> Drop your CV into ChatGPT or Gemini and ask:{" "}
-        <span className="italic">
-          "Convert this into a Phasely profile using YAML front-matter. Required: firstName, lastName, email. Include phone, location, currentTitle, currentCompany, yearsExperience, skills, education, workAuth, noticePeriod, salaryExpectation, willingToRelocate, remotePreference if present."
-        </span>{" "}
-        Then paste the result here and click Save.
+      <div className="options-hint mb-4 rounded-md bg-indigo-50 border border-indigo-100 px-4 py-3 text-xs text-indigo-800 space-y-2">
+        <p>
+          <span className="font-semibold">Don't want to write this by hand?</span> Drop your CV into ChatGPT or Gemini and use this prompt:
+        </p>
+        <blockquote className="italic border-l-2 border-indigo-300 pl-3 text-indigo-700">
+          "Convert this CV into a Phasely profile.md. Use YAML front-matter (between --- delimiters). Required fields: firstName, lastName, email. Include if present: phone, location, currentTitle, currentCompany, yearsExperience, skills (YAML list), education (YAML list with degree / institution / year), workAuth, noticePeriod, salaryExpectation, willingToRelocate, remotePreference. After the closing ---, add a brief markdown summary and experience section."
+        </blockquote>
+        <p>Paste the result here and click <span className="font-semibold">Save Profile</span>. The live preview below the editor will tell you if anything is missing before you save.</p>
       </div>
 
       {/* Paste area */}
@@ -296,7 +298,7 @@ function ProfileSection({
           spellCheck={false}
           rows={18}
           className={[
-            "w-full rounded-md border px-3 py-2 text-xs font-mono text-gray-700 placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:border-transparent resize-y",
+            "options-input w-full rounded-md border px-3 py-2 text-xs font-mono text-gray-700 placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:border-transparent resize-y",
             injectionHits.length > 0
               ? "border-amber-400 focus:ring-amber-400"
               : "border-gray-300 focus:ring-indigo-500",
@@ -313,7 +315,7 @@ function ProfileSection({
         {/* Live YAML validator — shows green preview or red error list as user types */}
         <ProfileValidator markdown={markdown} />
 
-        <p className="text-xs text-gray-400 flex items-center gap-1">
+        <p className="options-profile-help text-xs text-gray-400 flex items-center gap-1">
           <svg className="w-3 h-3 shrink-0" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
             <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
           </svg>
@@ -329,7 +331,7 @@ function ProfileSection({
           onClick={handleSave}
           disabled={!markdown.trim() || saving}
           className={[
-            "rounded-md px-4 py-2 text-sm font-medium transition-colors",
+            "options-btn-primary rounded-md px-4 py-2 text-sm font-medium transition-colors",
             markdown.trim() && !saving
               ? "bg-indigo-600 text-white hover:bg-indigo-700"
               : "bg-gray-100 text-gray-400 cursor-not-allowed",
@@ -341,7 +343,7 @@ function ProfileSection({
 
       {/* Danger zone — wipe all data */}
       <div className="mt-6 pt-5 border-t border-red-100">
-        <p className="text-xs text-gray-400 mb-3">
+        <p className="options-profile-help text-xs text-gray-400 mb-3">
           Permanently delete all Phasely data — profile, resume, encryption key, and settings. Cannot be undone.
         </p>
 
@@ -388,8 +390,8 @@ function ProfileField({ label, value }: { label: string; value: string }) {
   if (!value) return null;
   return (
     <>
-      <dt className="text-gray-400">{label}</dt>
-      <dd className="text-gray-700 truncate">{value}</dd>
+      <dt className="options-profile-label">{label}</dt>
+      <dd className="options-profile-value truncate">{value}</dd>
     </>
   );
 }
@@ -535,15 +537,15 @@ function ResumeSection({
   )
 
   return (
-    <section className="rounded-lg border border-gray-200 p-6">
+    <section className="options-panel rounded-lg border border-gray-200 p-6">
       <SectionHeader
         title="Resume"
-        subtitle="Upload your resume once. Phasely attaches it to file-upload fields automatically — no dragging and dropping every time."
+        subtitle="Upload your resume once (PDF, DOC, or DOCX). Phasely attaches it automatically to file-upload fields on application forms. Optional — form filling works without it."
       />
 
       <div className="space-y-3">
         {storedFilename && (
-          <div className="flex items-center gap-2 rounded-md bg-gray-50 border border-gray-200 px-3 py-2 text-sm text-gray-700">
+          <div className="options-inset flex items-center gap-2 rounded-md bg-gray-50 border border-gray-200 px-3 py-2 text-sm text-gray-700">
             <svg className="w-4 h-4 text-red-500 shrink-0" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
               <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 000 2h6a1 1 0 100-2H7z" clipRule="evenodd" />
             </svg>
@@ -560,7 +562,7 @@ function ResumeSection({
             onClick={() => fileInputRef.current?.click()}
             disabled={saving}
             className={[
-              "rounded-md px-3 py-1.5 text-sm font-medium border transition-colors",
+              "options-btn-secondary rounded-md px-3 py-1.5 text-sm font-medium border transition-colors",
               !saving
                 ? "border-gray-300 text-gray-700 hover:border-gray-400 hover:bg-gray-50"
                 : "border-gray-200 text-gray-300 cursor-not-allowed",
@@ -590,12 +592,10 @@ function SettingsSection({
   settings,
   onSettingsSaved,
   modelsRefreshKey,
-  onOauthEnabledChange,
 }: {
   settings: ExtensionSettings;
   onSettingsSaved: (s: ExtensionSettings) => void;
   modelsRefreshKey: number;
-  onOauthEnabledChange?: (enabled: boolean) => void;
 }) {
   const [draft, setDraft] = useState<ExtensionSettings>(settings);
   const [saving, setSaving] = useState(false);
@@ -603,7 +603,7 @@ function SettingsSection({
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [modelsLoading, setModelsLoading] = useState(true);
-  const [oauthEnabled, setOauthEnabled] = useState(false);
+  const [apiKeySet, setApiKeySet] = useState(false);
   const [modelsError, setModelsError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -613,7 +613,7 @@ function SettingsSection({
       try {
         const res = await sendMsg<{
           ok: boolean;
-          oauthEnabled: boolean;
+          apiKeySet: boolean;
           models: string[];
           error?: string;
         }>({ type: "GET_GEMINI_MODELS" });
@@ -621,14 +621,13 @@ function SettingsSection({
         if (cancelled) return;
 
         const models = res.models ?? [];
-        setOauthEnabled(res.oauthEnabled);
-        onOauthEnabledChange?.(res.oauthEnabled);
+        setApiKeySet(res.apiKeySet);
         setAvailableModels(models);
         setModelsError(null);
 
         // Use functional setDraft to read current geminiModel without adding it
         // as a dependency — avoids re-fetching models on every model change.
-        if (res.oauthEnabled && models.length > 0) {
+        if (res.apiKeySet && models.length > 0) {
           setDraft((prev) => ({
             ...prev,
             geminiModel: models.includes(prev.geminiModel) ? prev.geminiModel : models[0],
@@ -644,8 +643,7 @@ function SettingsSection({
     return () => {
       cancelled = true;
     };
-    // onOauthEnabledChange is setOauthEnabled from parent useState — stable ref, safe to include.
-  }, [modelsRefreshKey, onOauthEnabledChange]);
+  }, [modelsRefreshKey]);
 
   const handleSave = useCallback(async () => {
     setSaving(true);
@@ -675,28 +673,62 @@ function SettingsSection({
   );
 
   return (
-    <section className="rounded-lg border border-gray-200 p-6">
+    <section className="options-panel rounded-lg border border-gray-200 p-6">
       <SectionHeader
         title="Extension Settings"
-        subtitle="Control how Phasely fills and submits applications."
+        subtitle="Control how Phasely fills and submits applications. Submit settings take effect immediately — no Google sign-in required."
       />
 
       <div className="space-y-5">
-        {/* Gemini model picker */}
+        {/* Confirm before submit toggle */}
+        <div className="flex items-start gap-3">
+          <input
+            id="confirmBeforeSubmit"
+            type="checkbox"
+            checked={draft.confirmBeforeSubmit}
+            onChange={(e) => update("confirmBeforeSubmit", e.target.checked)}
+            className="mt-0.5 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+          />
+          <label htmlFor="confirmBeforeSubmit" className="text-sm text-gray-700 cursor-pointer">
+            <span className="font-medium">Confirm before submitting</span>
+            <p className="text-xs text-gray-400 mt-0.5">
+              Show a confirmation dialog before Phasely clicks the Submit button. Recommended — keeps you in control.
+            </p>
+          </label>
+        </div>
+
+        {/* Auto-submit toggle */}
+        <div className="flex items-start gap-3">
+          <input
+            id="autoSubmit"
+            type="checkbox"
+            checked={draft.autoSubmit}
+            onChange={(e) => update("autoSubmit", e.target.checked)}
+            className="mt-0.5 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+          />
+          <label htmlFor="autoSubmit" className="text-sm text-gray-700 cursor-pointer">
+            <span className="font-medium">Auto-submit after fill</span>
+            <p className="text-xs text-gray-400 mt-0.5">
+              Automatically click Submit after filling all fields. Only takes effect when "Confirm before submitting" is also enabled.
+            </p>
+          </label>
+        </div>
+
+        {/* Gemini model picker — only relevant when API key is saved */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1.5">
-            Gemini model
+            Gemini model <span className="text-xs font-normal text-gray-400">(AI features)</span>
           </label>
           <select
             value={draft.geminiModel}
             onChange={(e) =>
               update("geminiModel", e.target.value as ExtensionSettings["geminiModel"])
             }
-            disabled={!oauthEnabled || modelsLoading}
+            disabled={!apiKeySet || modelsLoading}
             className={[
-              "rounded-md border px-3 py-1.5 text-sm focus:outline-none focus:ring-2 transition-colors cursor-pointer disabled:cursor-not-allowed",
-              !oauthEnabled
-                ? "border-red-300 bg-red-50 text-red-400 focus:ring-red-400"
+              "options-select rounded-md border px-3 py-1.5 text-sm focus:outline-none focus:ring-2 transition-colors cursor-pointer disabled:cursor-not-allowed",
+              !apiKeySet
+                ? "border-gray-200 bg-gray-50 text-gray-400 focus:ring-gray-300"
                 : "border-gray-300 text-gray-700 focus:ring-indigo-500",
             ].join(" ")}
           >
@@ -710,12 +742,9 @@ function SettingsSection({
               <option value={draft.geminiModel}>{draft.geminiModel}</option>
             )}
           </select>
-          <p className={[
-            "text-xs mt-1",
-            !oauthEnabled ? "text-red-500 font-medium" : "text-gray-400",
-          ].join(" ")}>
-            {!oauthEnabled
-              ? "Sign in with Google (above) to unlock model selection."
+          <p className="text-xs text-gray-400 mt-1">
+            {!apiKeySet
+              ? "Save your Gemini API key in the AI Settings section above to enable model selection."
               : modelsLoading
                 ? "Loading available Gemini models…"
                 : "Used for AI-written fields (cover letter, open questions)."}
@@ -728,11 +757,10 @@ function SettingsSection({
 
         <button
           onClick={handleSave}
-          disabled={saving || !oauthEnabled}
-          title={!oauthEnabled ? "Sign in with Google first" : undefined}
+          disabled={saving}
           className={[
-            "rounded-md px-4 py-2 text-sm font-medium transition-colors",
-            !saving && oauthEnabled
+            "options-btn-primary rounded-md px-4 py-2 text-sm font-medium transition-colors",
+            !saving
               ? "bg-indigo-600 text-white hover:bg-indigo-700"
               : "bg-gray-100 text-gray-400 cursor-not-allowed",
           ].join(" ")}
@@ -745,118 +773,126 @@ function SettingsSection({
 }
 
 // ---------------------------------------------------------------------------
-// Google Auth section
+// AI Settings section (Gemini API key)
 // ---------------------------------------------------------------------------
 
-function AuthSection({
-  oauthEnabled,
-  onAuthed,
-}: {
-  oauthEnabled: boolean;
-  onAuthed: () => void;
-}) {
-  const [authing, setAuthing] = useState(false);
-  const [authError, setAuthError] = useState<string | null>(null);
+function AiSettingsSection({ onKeySaved }: { onKeySaved: () => void }) {
+  const [apiKey, setApiKey] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saveSuccess, setSaveSuccess] = useState(false);
+  const [keyAlreadySaved, setKeyAlreadySaved] = useState(false);
 
-  const handleAuth = useCallback(async () => {
-    setAuthing(true);
-    setAuthError(null);
+  // Check on mount whether a key is already stored.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await sendMsg<{ ok: boolean; apiKeySet: boolean; models: string[] }>(
+          { type: "GET_GEMINI_MODELS" },
+        );
+        if (!cancelled && res.ok) setKeyAlreadySaved(res.apiKeySet);
+      } catch {
+        // Ignore — treat as no key stored.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const handleSave = useCallback(async () => {
+    const trimmed = apiKey.trim();
+    if (!trimmed) return;
+    setSaving(true);
+    setSaveError(null);
+    setSaveSuccess(false);
     try {
-      // AUTH_GOOGLE opens an interactive browser window — give the user
-      // up to 5 minutes to read and accept the consent screen.
-      const res = await sendMsg<{ ok: boolean; token?: string; error?: string }>(
-        { type: "AUTH_GOOGLE" },
-        300_000,
-      );
-      if (!res.ok) throw new Error(res.error ?? "Auth failed");
-      onAuthed();
+      const res = await sendMsg<{ ok: boolean; error?: string }>({
+        type: "SAVE_GEMINI_API_KEY",
+        apiKey: trimmed,
+      });
+      if (!res.ok) throw new Error(res.error ?? "Save failed");
+      setSaveSuccess(true);
+      setKeyAlreadySaved(true);
+      setApiKey("");
+      onKeySaved();
     } catch (err) {
-      setAuthError(String(err));
+      setSaveError(String(err));
     } finally {
-      setAuthing(false);
+      setSaving(false);
     }
-  }, [onAuthed]);
+  }, [apiKey, onKeySaved]);
 
   return (
-    <section
-      className={[
-        "rounded-lg border p-6 transition-colors",
-        oauthEnabled ? "border-green-200 bg-green-50/40" : "border-gray-200",
-      ].join(" ")}
-    >
-      <div className="mb-4 flex items-start justify-between gap-3">
-        <div>
-          <h2 className="text-base font-semibold text-gray-900">Google Account (AI features)</h2>
-          <p className="text-sm text-gray-500 mt-0.5">
-            Connect your Google account to unlock AI-generated cover letters and open questions.
-            Calls go directly to Google — no Phasely servers involved.
-          </p>
-        </div>
-        {oauthEnabled && (
-          <span className="shrink-0 flex items-center gap-1.5 rounded-full bg-green-100 border border-green-300 px-2.5 py-1 text-xs font-semibold text-green-800">
-            <span className="w-1.5 h-1.5 rounded-full bg-green-500 inline-block" />
-            Connected
-          </span>
-        )}
-      </div>
+    <section className="options-panel rounded-lg border border-gray-200 p-6">
+      <SectionHeader
+        title="AI Settings"
+        subtitle="Enter your Gemini API key to enable AI-powered cover letter and field generation. Get a free key at aistudio.google.com."
+      />
 
       <div className="space-y-3">
-        {authError && <Alert type="error">{authError}</Alert>}
+        {/* Show saved-key indicator when a key is already stored */}
+        {keyAlreadySaved && !saveSuccess && (
+          <div className="flex items-center gap-2 rounded-md bg-green-50 border border-green-200 px-3 py-2 text-xs text-green-800">
+            <svg className="w-3.5 h-3.5 shrink-0 text-green-600" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+              <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
+            </svg>
+            API key saved and encrypted. Enter a new key below to replace it.
+          </div>
+        )}
 
-        {oauthEnabled && (
-          <Alert type="success">
-            Google account connected. AI features are active.
-          </Alert>
+        <div>
+          <label htmlFor="geminiApiKey" className="block text-sm font-medium text-gray-700 mb-1.5">
+            {keyAlreadySaved ? "Replace Gemini API key" : "Gemini API key"}
+          </label>
+          <input
+            id="geminiApiKey"
+            type="password"
+            value={apiKey}
+            onChange={(e) => {
+              setApiKey(e.target.value);
+              setSaveSuccess(false);
+              setSaveError(null);
+            }}
+            placeholder="AIza…"
+            autoComplete="off"
+            spellCheck={false}
+            className="options-input w-full rounded-md border border-gray-300 px-3 py-2 text-sm font-mono text-gray-700 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+          />
+        </div>
+
+        <p className="text-xs text-gray-400">
+          Your key is encrypted on-device and never leaves your browser.
+          Get a free key at{" "}
+          <a
+            href="https://aistudio.google.com/app/apikey"
+            target="_blank"
+            rel="noreferrer"
+            className="text-indigo-600 hover:underline"
+          >
+            aistudio.google.com
+          </a>
+          . Form filling works without a key — this only unlocks AI-generated fields.
+        </p>
+
+        {saveError && <Alert type="error">{saveError}</Alert>}
+        {saveSuccess && (
+          <Alert type="success">API key saved and encrypted. AI features are now active.</Alert>
         )}
 
         <button
-          onClick={handleAuth}
-          disabled={authing}
+          onClick={handleSave}
+          disabled={!apiKey.trim() || saving}
           className={[
-            "flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium border transition-colors",
-            !authing
-              ? "border-gray-300 text-gray-700 hover:border-gray-400 hover:bg-gray-50"
-              : "border-gray-200 text-gray-300 cursor-not-allowed",
+            "options-btn-primary rounded-md px-4 py-2 text-sm font-medium transition-colors",
+            apiKey.trim() && !saving
+              ? "bg-indigo-600 text-white hover:bg-indigo-700"
+              : "bg-gray-100 text-gray-400 cursor-not-allowed",
           ].join(" ")}
         >
-          {authing ? (
-            "Connecting…"
-          ) : (
-            <>
-              <GoogleIcon />
-              {oauthEnabled ? "Re-authenticate" : "Sign in with Google"}
-            </>
-          )}
+          {saving ? "Saving…" : keyAlreadySaved ? "Replace API key" : "Save API key"}
         </button>
-
-        <p className="text-xs text-gray-400">
-          Only the Gemini AI scope is requested — no access to Gmail, Drive, or any other Google service.
-        </p>
       </div>
     </section>
-  );
-}
-
-function GoogleIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
-      <path
-        d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-        fill="#4285F4"
-      />
-      <path
-        d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-        fill="#34A853"
-      />
-      <path
-        d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
-        fill="#FBBC05"
-      />
-      <path
-        d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
-        fill="#EA4335"
-      />
-    </svg>
   );
 }
 
@@ -873,7 +909,7 @@ function UpcomingSection() {
   ];
 
   return (
-    <section className="rounded-lg border border-amber-200 bg-gradient-to-br from-amber-50 to-white p-6">
+    <section className="options-upcoming rounded-lg border border-amber-200 bg-linear-to-br from-amber-50 to-white p-6">
       <div className="mb-4">
         <h2 className="text-base font-semibold text-amber-900">Coming up</h2>
         <p className="text-sm text-amber-800 mt-0.5">
@@ -883,7 +919,7 @@ function UpcomingSection() {
 
       <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm text-gray-700">
         {upcoming.map((feature) => (
-          <li key={feature} className="rounded-md border border-amber-100 bg-white px-3 py-2">
+          <li key={feature} className="options-upcoming-item rounded-md border border-amber-100 bg-white px-3 py-2">
             {feature}
           </li>
         ))}
@@ -900,7 +936,6 @@ export function Options() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [resumeFilename, setResumeFilename] = useState<string | null>(null);
   const [settings, setSettings] = useState<ExtensionSettings>(DEFAULT_SETTINGS);
-  const [oauthEnabled, setOauthEnabled] = useState(false);
   const [modelsRefreshKey, setModelsRefreshKey] = useState(0);
   const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
     try {
@@ -949,14 +984,14 @@ export function Options() {
     window.location.reload();
   }, []);
 
-  const handleAuthed = useCallback(() => {
+  const handleKeySaved = useCallback(() => {
     setModelsRefreshKey((k) => k + 1);
   }, []);
 
   if (loading) {
     return (
       <div className={[
-        "min-h-screen flex items-center justify-center",
+        "options-page min-h-screen flex items-center justify-center",
         isDarkMode ? "options-dark bg-gray-900" : "bg-gray-50",
       ].join(" ")}>
         <span className="text-sm text-gray-500">Loading…</span>
@@ -966,23 +1001,23 @@ export function Options() {
 
   return (
     <div className={[
-      "min-h-screen font-sans",
+      "options-page min-h-screen font-sans",
       isDarkMode ? "options-dark bg-gray-900" : "bg-gray-50",
     ].join(" ")}>
       {/* Page header */}
-      <div className="bg-white border-b border-gray-200">
+      <div className="options-topbar bg-white border-b border-gray-200">
         <div className="max-w-2xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <img src={logoIcon} alt="Phasely logo" className="w-8 h-8 rounded-lg" />
             <div>
-              <h1 className="text-lg font-bold text-gray-900 tracking-tight">Phasely</h1>
-              <p className="text-xs text-gray-400">Settings</p>
+              <h1 className="options-brand text-lg font-bold text-gray-900 tracking-tight">Phasely</h1>
+              <p className="options-brand-sub text-xs text-gray-400">Settings</p>
             </div>
           </div>
           <div className="flex items-center gap-3">
             <button
               onClick={() => setIsDarkMode((prev) => !prev)}
-              className="rounded-md border border-gray-300 px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+              className="options-btn-secondary rounded-md border border-gray-300 px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors"
             >
               {isDarkMode ? "Light mode" : "Dark mode"}
             </button>
@@ -1006,8 +1041,8 @@ export function Options() {
         )}
 
         {/* Introduction */}
-        <div className="rounded-xl border border-indigo-100 bg-gradient-to-br from-indigo-50 to-white px-6 py-5 dark:bg-gray-800">
-          <h2 className="text-sm font-semibold text-indigo-900 mb-1.5">Fill every form. Once.</h2>
+        <div className="options-hero rounded-xl border border-indigo-100 bg-linear-to-br from-indigo-50 to-white dark:bg-gray-800 px-6 py-5">
+          <h2 className="options-hero-title text-sm font-semibold text-indigo-900 mb-1.5">Fill every form. Once.</h2>
           <p className="text-sm text-gray-600 leading-relaxed">
             Write your profile once. Phasely handles the copy-paste — Workday, Greenhouse, Lever, iCIMS, and more,
             all filled in one click. Everything stays encrypted on your device. No accounts. No servers. No nonsense.
@@ -1043,13 +1078,12 @@ export function Options() {
           onResumeSaved={setResumeFilename}
         />
 
-        <AuthSection oauthEnabled={oauthEnabled} onAuthed={handleAuthed} />
+        <AiSettingsSection onKeySaved={handleKeySaved} />
 
         <SettingsSection
           settings={settings}
           onSettingsSaved={setSettings}
           modelsRefreshKey={modelsRefreshKey}
-          onOauthEnabledChange={setOauthEnabled}
         />
 
         <UpcomingSection />
@@ -1063,7 +1097,7 @@ export function Options() {
             href="https://github.com/phasely/phasely"
             target="_blank"
             rel="noopener noreferrer"
-            className="text-sm text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 dark:hover:text-indigo-300"
+            className="options-link text-sm text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 dark:hover:text-indigo-300"
           >
            Source code on GitHub
           </a>

@@ -9,7 +9,7 @@
  *   - All chrome.* calls are wrapped in try/catch with [Phasely] prefix logging.
  */
 
-import { getProfile, setProfile, getResume, setResume, getSettings, setSettings, setGeminiToken, getGeminiToken, wipeAll, getPresets, setPresets } from "@/lib/storage";
+import { getProfile, setProfile, getResume, setResume, getSettings, setSettings, getGeminiApiKey, setGeminiApiKey, wipeAll, getPresets, setPresets } from "@/lib/storage";
 import { DEFAULT_SETTINGS } from "@/lib/defaults";
 import type { StoredResume } from "@/lib/types";
 import { parseProfile, ProfileParseError } from "@/lib/profile";
@@ -41,8 +41,8 @@ export type Message =
   | { type: "SAVE_RESUME"; base64: string; filename: string; mimeType: string }
   | { type: "GET_SETTINGS" }
   | { type: "SAVE_SETTINGS"; settings: ExtensionSettings }
-  | { type: "AUTH_GOOGLE" }
   | { type: "GET_GEMINI_MODELS" }
+  | { type: "SAVE_GEMINI_API_KEY"; apiKey: string }
   | { type: "GET_PRESETS" }
   | { type: "SAVE_PRESETS"; presets: ProfilePreset[] }
   | { type: "WIPE_DATA" };
@@ -235,106 +235,45 @@ async function handleSaveSettings(
   }
 }
 
-async function handleGetGeminiModels(): Promise<Response<{ oauthEnabled: boolean; models: string[] }>> {
+async function handleGetGeminiModels(): Promise<Response<{ apiKeySet: boolean; models: string[] }>> {
   try {
-    const fetchModels = async (token: string): Promise<{ ok: boolean; models: string[]; authFailed: boolean; error?: string }> => {
-      const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200", {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
+    const apiKey = await getGeminiApiKey();
+    if (!apiKey || apiKey.trim().length === 0) {
+      return { ok: true, apiKeySet: false, models: [] };
+    }
 
-      if (!response.ok) {
-        if (response.status === 401 || response.status === 403) {
-          return { ok: false, models: [], authFailed: true };
-        }
-        const body = await response.text();
-        return {
-          ok: false,
-          models: [],
-          authFailed: false,
-          error: `Failed to fetch Gemini models (${response.status}): ${body}`,
-        };
-      }
+    const url = `https://generativelanguage.googleapis.com/v1beta/models?pageSize=200&key=${encodeURIComponent(apiKey)}`;
+    const response = await fetch(url, { method: "GET" });
 
-      const payload = (await response.json()) as {
-        models?: Array<{ name?: string; supportedGenerationMethods?: string[] }>;
+    if (!response.ok) {
+      const body = await response.text();
+      return {
+        ok: false,
+        error: `Failed to fetch Gemini models (${response.status}): ${body}`,
       };
-      const available = (payload.models ?? [])
-        .filter((model) => (model.supportedGenerationMethods ?? []).includes("generateContent"))
-        .map((model) => (model.name ?? "").replace(/^models\//, ""))
-        .filter((name) => name.startsWith("gemini-"));
+    }
 
-      return { ok: true, models: Array.from(new Set(available)), authFailed: false };
+    const payload = (await response.json()) as {
+      models?: Array<{ name?: string; supportedGenerationMethods?: string[] }>;
     };
+    const available = (payload.models ?? [])
+      .filter((model) => (model.supportedGenerationMethods ?? []).includes("generateContent"))
+      .map((model) => (model.name ?? "").replace(/^models\//, ""))
+      .filter((name) => name.startsWith("gemini-"));
 
-    const readAuthToken = async (): Promise<string | null> => {
-      const token = await getGeminiToken();
-      return token && token.trim().length > 0 ? token : null;
-    };
+    return { ok: true, apiKeySet: true, models: Array.from(new Set(available)) };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
 
-    const acquireAuthToken = async (interactive: boolean): Promise<string | null> => {
-      const token = await new Promise<string | null>((resolve, reject) => {
-        chrome.identity.getAuthToken({ interactive }, (result) => {
-          if (chrome.runtime.lastError) {
-            const message = chrome.runtime.lastError.message ?? "getAuthToken failed";
-            if (!interactive) {
-              resolve(null);
-              return;
-            }
-            reject(new Error(message));
-            return;
-          }
-
-          const tokenStr =
-            typeof result === "string"
-              ? result
-              : (result as { token?: string })?.token ?? "";
-          resolve(tokenStr || null);
-        });
-      });
-      if (token) {
-        await setGeminiToken(token);
-      }
-      return token;
-    };
-
-    const invalidateAuthToken = async (token: string): Promise<void> => {
-      await new Promise<void>((resolve) => {
-        chrome.identity.removeCachedAuthToken({ token }, () => resolve());
-      });
-    };
-
-    let token = await readAuthToken();
-    if (!token) {
-      return { ok: true, oauthEnabled: false, models: [] };
-    }
-
-    let result = await fetchModels(token);
-    if (result.ok) {
-      return { ok: true, oauthEnabled: true, models: result.models };
-    }
-
-    if (!result.authFailed) {
-      throw new Error(result.error ?? "Failed to fetch Gemini models");
-    }
-
-    await invalidateAuthToken(token);
-    token = await acquireAuthToken(false);
-    if (!token) {
-      return { ok: true, oauthEnabled: false, models: [] };
-    }
-
-    result = await fetchModels(token);
-    if (result.ok) {
-      return { ok: true, oauthEnabled: true, models: result.models };
-    }
-
-    if (result.authFailed) {
-      return { ok: true, oauthEnabled: false, models: [] };
-    }
-    throw new Error(result.error ?? "Failed to fetch Gemini models");
+async function handleSaveGeminiApiKey(
+  apiKey: string,
+): Promise<Response<Record<never, never>>> {
+  try {
+    await setGeminiApiKey(apiKey);
+    debug("SAVE_GEMINI_API_KEY: key stored");
+    return { ok: true };
   } catch (err) {
     return { ok: false, error: String(err) };
   }
@@ -365,104 +304,6 @@ async function handleSaveResume(
     return { ok: true };
   } catch (err) {
     return { ok: false, error: String(err) };
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Google OAuth handler
-// ---------------------------------------------------------------------------
-
-/**
- * Launch the Google OAuth flow.
- *
- * Strategy:
- *  1. Try chrome.identity.getAuthToken (only works for Web Store published
- *     extensions with a verified OAuth client).
- *  2. On failure, fall back to chrome.identity.launchWebAuthFlow, which
- *     works for unpacked/dev installs by opening a real browser popup.
- *
- * The token is stored in chrome.storage.local under "geminiToken" so the
- * Gemini client can retrieve it when needed.
- *
- * Returns { ok: true, token } on success, { ok: false, error } on failure.
- */
-async function handleAuthGoogle(): Promise<Response<{ token: string }>> {
-  // Keep the service worker alive while waiting for the interactive OAuth
-  // popup. Without this, MV3 may terminate the SW after ~30 s of inactivity.
-  const KEEPALIVE_ALARM = "phasely-auth-keepalive";
-  await chrome.alarms.create(KEEPALIVE_ALARM, { periodInMinutes: 0.4 });
-
-  try {
-    // --- Path 1: getAuthToken (published extensions on Chrome Web Store) ---
-    const token = await new Promise<string>((resolve, reject) => {
-      try {
-        chrome.identity.getAuthToken({ interactive: true }, (result) => {
-          if (chrome.runtime.lastError) {
-            reject(new Error(chrome.runtime.lastError.message ?? "getAuthToken failed"));
-            return;
-          }
-          // @types/chrome ≥ 0.0.290 returns GetAuthTokenResult | string
-          const tokenStr =
-            typeof result === "string"
-              ? result
-              : (result as { token?: string })?.token ?? "";
-          if (!tokenStr) {
-            reject(new Error("getAuthToken returned no token"));
-          } else {
-            resolve(tokenStr);
-          }
-        });
-      } catch (err) {
-        reject(err);
-      }
-    }).catch(async (err) => {
-      // --- Path 2: launchWebAuthFlow (unpacked / dev installs) ---
-      debug("AUTH_GOOGLE: getAuthToken failed, falling back to launchWebAuthFlow:", err);
-
-      const CLIENT_ID = "784576406530-e1tl8bin3gk5lduqkt89se25pqa9uaje.apps.googleusercontent.com";
-      const SCOPE = "https://www.googleapis.com/auth/generative-language";
-      const redirectUri = chrome.identity.getRedirectURL();
-      const authUrl =
-        `https://accounts.google.com/o/oauth2/v2/auth` +
-        `?client_id=${encodeURIComponent(CLIENT_ID)}` +
-        `&response_type=token` +
-        `&redirect_uri=${encodeURIComponent(redirectUri)}` +
-        `&scope=${encodeURIComponent(SCOPE)}`;
-
-      return new Promise<string>((resolve, reject) => {
-        chrome.identity.launchWebAuthFlow(
-          { url: authUrl, interactive: true },
-          (responseUrl) => {
-            if (chrome.runtime.lastError || !responseUrl) {
-              reject(new Error(chrome.runtime.lastError?.message ?? "launchWebAuthFlow returned no URL"));
-              return;
-            }
-            // Extract access_token from the fragment: #access_token=...&...
-            const hash = new URL(responseUrl).hash.slice(1);
-            const params = new URLSearchParams(hash);
-            const accessToken = params.get("access_token");
-            if (!accessToken) {
-              reject(new Error("No access_token in OAuth redirect"));
-            } else {
-              resolve(accessToken);
-            }
-          }
-        );
-      });
-    });
-
-    debug("AUTH_GOOGLE: token acquired");
-
-    // Persist the token so the Gemini client can retrieve it when needed.
-    await setGeminiToken(token);
-
-    return { ok: true, token };
-  } catch (err) {
-    console.error("[Phasely] AUTH_GOOGLE failed:", err);
-    return { ok: false, error: String(err) };
-  } finally {
-    // Always clear the keepalive alarm once auth resolves or rejects.
-    await chrome.alarms.clear(KEEPALIVE_ALARM);
   }
 }
 
@@ -575,12 +416,12 @@ chrome.runtime.onMessage.addListener(
             sendResponse(await handleSaveSettings(msg.settings));
             break;
 
-          case "AUTH_GOOGLE":
-            sendResponse(await handleAuthGoogle());
-            break;
-
           case "GET_GEMINI_MODELS":
             sendResponse(await handleGetGeminiModels());
+            break;
+
+          case "SAVE_GEMINI_API_KEY":
+            sendResponse(await handleSaveGeminiApiKey(msg.apiKey));
             break;
 
           case "GET_PRESETS":

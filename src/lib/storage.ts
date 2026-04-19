@@ -349,7 +349,7 @@ export async function setPresets(presets: ProfilePreset[]): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Gemini token helpers
+// Gemini token helpers (OAuth — kept for backward compatibility / wipe coverage)
 // ---------------------------------------------------------------------------
 
 const KEY_GEMINI_TOKEN = "geminiToken";
@@ -378,6 +378,40 @@ export async function getGeminiToken(): Promise<string | null> {
     return await decryptData(stored.iv, stored.data);
   } catch (err) {
     console.error("[Phasely] getGeminiToken failed:", err);
+    throw err;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Gemini API key helpers (user-supplied key — replaces OAuth for direct API use)
+// ---------------------------------------------------------------------------
+
+const KEY_GEMINI_API_KEY = "gemini_api_key";
+
+/**
+ * Encrypt and persist the user-supplied Gemini API key.
+ */
+export async function setGeminiApiKey(key: string): Promise<void> {
+  try {
+    const encrypted = await encryptData(key);
+    await storageSet(KEY_GEMINI_API_KEY, encrypted);
+  } catch (err) {
+    console.error("[Phasely] setGeminiApiKey failed:", err);
+    throw err;
+  }
+}
+
+/**
+ * Retrieve and decrypt the user-supplied Gemini API key.
+ * Returns null if no key has been stored yet.
+ */
+export async function getGeminiApiKey(): Promise<string | null> {
+  try {
+    const stored = await storageGet<{ iv: string; data: string }>(KEY_GEMINI_API_KEY);
+    if (stored === null) return null;
+    return await decryptData(stored.iv, stored.data);
+  } catch (err) {
+    console.error("[Phasely] getGeminiApiKey failed:", err);
     throw err;
   }
 }

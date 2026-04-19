@@ -10,7 +10,7 @@
 import { detectFields, scrapeJobContext } from "./content/detector"
 import { fillField, fillFile } from "./content/filler"
 import { submitForm } from "./content/submitter"
-import type { Profile, ExtensionSettings } from "./lib/types"
+import type { DetectedField, Profile, ExtensionSettings } from "./lib/types"
 
 // Re-export modules so the entry point doubles as a barrel (used by tests).
 export * from "./content/detector"
@@ -38,7 +38,7 @@ chrome.runtime.onMessage.addListener(
     }
 
     const msg = message as { type: string } & Record<string, unknown>
-    const contentMessageTypes = new Set(["DETECT_FIELDS", "FILL_ALL", "FILL_ONLY", "SUBMIT"])
+    const contentMessageTypes = new Set(["DETECT_FIELDS", "FILL_ALL", "FILL_ONLY", "FILL_AI_TEXT", "SUBMIT"])
     if (!contentMessageTypes.has(msg.type)) {
       return false
     }

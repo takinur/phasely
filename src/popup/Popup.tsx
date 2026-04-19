@@ -52,8 +52,8 @@ function StatusDot({ ok }: { ok: boolean }) {
   return (
     <span
       className={[
-        "inline-block w-2 h-2 rounded-full",
-        ok ? "bg-green-500" : "bg-red-400",
+        "inline-block w-2.5 h-2.5 rounded-full popup-status-dot",
+        ok ? "popup-status-ok" : "popup-status-missing",
       ].join(" ")}
     />
   );
@@ -157,22 +157,23 @@ export function Popup() {
 
   const hasProfile = profile !== null;
   const isWorking = phase !== "idle";
-  const canFill = hasProfile && hasResume && !isWorking;
+  // Fill only requires a profile; resume is optional (file fields are skipped gracefully when absent).
+  const canFill = hasProfile && !isWorking;
 
   return (
-    <div className="w-80 min-h-36 bg-white font-sans text-sm flex flex-col">
+    <div className="popup-shell w-80 min-h-36 text-sm flex flex-col">
       {/* Header */}
-      <header className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
+      <header className="popup-header flex items-center justify-between px-4 py-3">
         <div className="flex items-center gap-2">
-          <img src={logoIcon} alt="Phasely logo" className="w-5 h-5 rounded" />
-          <span className="font-bold text-base tracking-tight text-gray-900">Phasely</span>
+          <img src={logoIcon} alt="Phasely logo" className="w-5 h-5 rounded-md ring-1 ring-white/20" />
+          <span className="popup-brand font-semibold text-base tracking-tight">Phasely</span>
           <StatusDot ok={hasProfile && hasResume} />
         </div>
         <a
           href={chrome.runtime.getURL("src/options.html")}
           target="_blank"
           rel="noreferrer"
-          className="text-xs text-indigo-500 hover:text-indigo-700 hover:underline"
+          className="popup-link text-xs"
         >
           Settings
         </a>
@@ -181,7 +182,7 @@ export function Popup() {
       <div className="flex flex-col gap-3 p-4 flex-1">
         {/* No profile */}
         {!hasProfile && (
-          <div className="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
+          <div className="popup-alert popup-alert-warning px-3 py-2 text-xs">
             No profile found. Open{" "}
             <a
               href={chrome.runtime.getURL("src/options.html")}
@@ -197,7 +198,7 @@ export function Popup() {
 
         {/* No resume */}
         {hasProfile && !hasResume && (
-          <div className="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
+          <div className="popup-alert popup-alert-warning px-3 py-2 text-xs">
             <span className="font-semibold">No resume uploaded.</span> Add one in{" "}
             <a
               href={chrome.runtime.getURL("src/options.html")}
@@ -213,25 +214,25 @@ export function Popup() {
 
         {/* Profile chip */}
         {hasProfile && profile && (
-          <div className="flex items-center gap-2 text-xs text-gray-500">
-            <span className="truncate font-medium text-gray-700">
+          <div className="popup-chip flex items-center gap-2 text-xs px-2.5 py-1.5 rounded-md">
+            <span className="truncate font-semibold popup-chip-name">
               {profile.firstName} {profile.lastName}
             </span>
-            <span className="text-gray-300">·</span>
-            <span className="truncate">{profile.currentTitle}</span>
+            <span className="popup-chip-dot">•</span>
+            <span className="truncate popup-chip-role">{profile.currentTitle}</span>
           </div>
         )}
 
         {/* Error */}
         {error && (
-          <div className="rounded-md bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-700 break-words">
+          <div className="popup-alert popup-alert-error px-3 py-2 text-xs wrap-break-word">
             {error}
           </div>
         )}
 
         {/* Fill done */}
         {fillDone && !error && (
-          <div className="rounded-md bg-green-50 border border-green-200 px-3 py-2 text-xs text-green-700">
+          <div className="popup-alert popup-alert-success px-3 py-2 text-xs">
             Fields filled successfully.
           </div>
         )}
@@ -242,10 +243,10 @@ export function Popup() {
             onClick={handleFill}
             disabled={!canFill}
             className={[
-              "flex-1 rounded-md px-3 py-2 text-sm font-medium transition-colors flex items-center justify-center gap-1.5",
+              "flex-1 rounded-md px-3 py-2 text-sm font-medium transition-all duration-150 flex items-center justify-center gap-1.5",
               canFill
-                ? "bg-indigo-600 text-white hover:bg-indigo-700"
-                : "bg-gray-100 text-gray-400 cursor-not-allowed",
+                ? "popup-btn popup-btn-fill"
+                : "popup-btn-disabled cursor-not-allowed",
             ].join(" ")}
           >
             {phase === "filling" ? (
@@ -264,10 +265,10 @@ export function Popup() {
             onClick={handleFillAndSubmit}
             disabled={!canFill}
             className={[
-              "flex-1 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+              "flex-1 rounded-md px-3 py-2 text-sm font-medium transition-all duration-150",
               canFill
-                ? "bg-green-600 text-white hover:bg-green-700"
-                : "bg-gray-100 text-gray-400 cursor-not-allowed",
+                ? "popup-btn popup-btn-submit"
+                : "popup-btn-disabled cursor-not-allowed",
             ].join(" ")}
           >
             {phase === "submitting" ? "Submitting…" : "Fill & Submit"}
@@ -280,10 +281,10 @@ export function Popup() {
             onClick={submitApplication}
             disabled={isWorking}
             className={[
-              "w-full rounded-md px-3 py-2 text-sm font-medium border transition-colors",
+              "w-full rounded-md px-3 py-2 text-sm font-medium border transition-all duration-150",
               !isWorking
-                ? "border-gray-300 text-gray-700 hover:border-gray-400 hover:bg-gray-50"
-                : "border-gray-200 text-gray-300 cursor-not-allowed",
+                ? "popup-btn-secondary"
+                : "popup-btn-disabled cursor-not-allowed",
             ].join(" ")}
           >
             {phase === "submitting" ? "Submitting…" : "Submit Application"}
