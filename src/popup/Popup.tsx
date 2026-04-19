@@ -9,7 +9,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { ExtensionSettings, Profile, StoredResume } from "@/lib/types";
-import logoIcon from "@/assets/phasely-icon.svg";
+import logoIcon from "@/assets/logo_phasely.png";
 
 // ---------------------------------------------------------------------------
 // Chrome message helpers (typed)

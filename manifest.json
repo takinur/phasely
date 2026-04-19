@@ -13,9 +13,10 @@
         "default_popup": "src/popup.html",
         "default_title": "Phasely",
         "default_icon": {
-            "16": "src/assets/phasely-icon.svg",
-            "48": "src/assets/phasely-icon.svg",
-            "128": "src/assets/phasely-icon.svg"
+            "16": "src/assets/icon-16.png",
+            "32": "src/assets/icon-32.png",
+            "48": "src/assets/icon-48.png",
+            "128": "src/assets/icon-128.png"
         }
     },
     "background": {
@@ -33,8 +34,9 @@
         "open_in_tab": true
     },
     "icons": {
-        "16": "src/assets/phasely-icon.svg",
-        "48": "src/assets/phasely-icon.svg",
-        "128": "src/assets/phasely-icon.svg"
+        "16": "src/assets/icon-16.png",
+        "32": "src/assets/icon-32.png",
+        "48": "src/assets/icon-48.png",
+        "128": "src/assets/icon-128.png"
     }
 }

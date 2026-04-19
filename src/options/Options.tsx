@@ -15,7 +15,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ExtensionSettings, Profile, StoredResume } from "@/lib/types";
 import { profileToMarkdown, detectInjection, parseProfile, ProfileParseError } from "@/lib/profile";
 import { DEFAULT_SETTINGS } from "@/lib/defaults";
-import logoIcon from "@/assets/phasely-icon.svg";
+import logoIcon from "@/assets/logo_phasely.png";
 
 // ---------------------------------------------------------------------------
 // Chrome message helper
