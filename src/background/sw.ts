@@ -373,28 +373,27 @@ async function handleSaveResume(
 // ---------------------------------------------------------------------------
 
 /**
- * Launch the Google OAuth flow using chrome.identity.launchWebAuthFlow.
+ * Launch the Google OAuth flow.
  *
- * MV3 note: chrome.identity.getAuthToken is only available for extensions
- * published on the Chrome Web Store with a verified OAuth client. During
- * development we fall back to launchWebAuthFlow with the extension's own
- * client ID. The token is stored in chrome.storage.session (ephemeral —
- * never persists across SW restarts) and is NOT encrypted because it is
- * already scoped to the browser profile.
+ * Strategy:
+ *  1. Try chrome.identity.getAuthToken (only works for Web Store published
+ *     extensions with a verified OAuth client).
+ *  2. On failure, fall back to chrome.identity.launchWebAuthFlow, which
+ *     works for unpacked/dev installs by opening a real browser popup.
  *
- * The token is also saved to chrome.storage.local under "geminiToken" so
- * the Gemini client can retrieve it when needed.
+ * The token is stored in chrome.storage.local under "geminiToken" so the
+ * Gemini client can retrieve it when needed.
  *
  * Returns { ok: true, token } on success, { ok: false, error } on failure.
  */
 async function handleAuthGoogle(): Promise<Response<{ token: string }>> {
-  // Keep the service worker alive with a recurring alarm while we wait for the
-  // user to complete the interactive OAuth popup. Without this, MV3 may
-  // terminate the SW after ~30 s of perceived inactivity, losing the callback.
+  // Keep the service worker alive while waiting for the interactive OAuth
+  // popup. Without this, MV3 may terminate the SW after ~30 s of inactivity.
   const KEEPALIVE_ALARM = "phasely-auth-keepalive";
   await chrome.alarms.create(KEEPALIVE_ALARM, { periodInMinutes: 0.4 });
 
   try {
+    // --- Path 1: getAuthToken (published extensions on Chrome Web Store) ---
     const token = await new Promise<string>((resolve, reject) => {
       try {
         chrome.identity.getAuthToken({ interactive: true }, (result) => {
@@ -416,9 +415,43 @@ async function handleAuthGoogle(): Promise<Response<{ token: string }>> {
       } catch (err) {
         reject(err);
       }
+    }).catch(async (err) => {
+      // --- Path 2: launchWebAuthFlow (unpacked / dev installs) ---
+      debug("AUTH_GOOGLE: getAuthToken failed, falling back to launchWebAuthFlow:", err);
+
+      const CLIENT_ID = "784576406530-e1tl8bin3gk5lduqkt89se25pqa9uaje.apps.googleusercontent.com";
+      const SCOPE = "https://www.googleapis.com/auth/generative-language";
+      const redirectUri = chrome.identity.getRedirectURL();
+      const authUrl =
+        `https://accounts.google.com/o/oauth2/v2/auth` +
+        `?client_id=${encodeURIComponent(CLIENT_ID)}` +
+        `&response_type=token` +
+        `&redirect_uri=${encodeURIComponent(redirectUri)}` +
+        `&scope=${encodeURIComponent(SCOPE)}`;
+
+      return new Promise<string>((resolve, reject) => {
+        chrome.identity.launchWebAuthFlow(
+          { url: authUrl, interactive: true },
+          (responseUrl) => {
+            if (chrome.runtime.lastError || !responseUrl) {
+              reject(new Error(chrome.runtime.lastError?.message ?? "launchWebAuthFlow returned no URL"));
+              return;
+            }
+            // Extract access_token from the fragment: #access_token=...&...
+            const hash = new URL(responseUrl).hash.slice(1);
+            const params = new URLSearchParams(hash);
+            const accessToken = params.get("access_token");
+            if (!accessToken) {
+              reject(new Error("No access_token in OAuth redirect"));
+            } else {
+              resolve(accessToken);
+            }
+          }
+        );
+      });
     });
 
-    debug("AUTH_GOOGLE: token acquired via getAuthToken");
+    debug("AUTH_GOOGLE: token acquired");
 
     // Persist the token so the Gemini client can retrieve it when needed.
     await setGeminiToken(token);
