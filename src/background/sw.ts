@@ -269,7 +269,7 @@ async function handleGetGeminiModels(): Promise<Response<{ apiKeySet: boolean; m
   }
 }
 
-async function handleGenerateCoverLetter(): Promise<Response<Record<never, never>>> {
+async function handleGenerateCoverLetter(): Promise<Response<{ text: string; filled: boolean }>> {
   try {
     // 1. Get profile and API key from storage.
     const [profile, apiKey, settings] = await Promise.all([
@@ -280,7 +280,7 @@ async function handleGenerateCoverLetter(): Promise<Response<Record<never, never
     if (!profile) return { ok: false, error: "No profile saved. Add your profile in Settings first." };
     if (!apiKey) return { ok: false, error: "No Gemini API key saved. Add one in Settings → AI Settings." };
 
-    const model = settings?.geminiModel ?? "gemini-2.5-flash-preview-05-20";
+    const model = settings?.geminiModel ?? "gemini-3-flash-preview";
 
     // 2. Get job context from the active tab via the content script.
     const tabResult = await forwardToActiveTab({ type: "DETECT_FIELDS", profile });
@@ -319,6 +319,8 @@ async function handleGenerateCoverLetter(): Promise<Response<Record<never, never
     debug("GENERATE_COVER_LETTER: generated", generatedText.length, "chars");
 
     // 4. Inject the text into the cover letter field on the active tab.
+    // Always return the generated text to the popup regardless of fill outcome.
+    let filled = false;
     const fillResult = await forwardToActiveTab({
       type: "FILL_AI_TEXT" as never,
       key: "coverLetter",
@@ -326,12 +328,11 @@ async function handleGenerateCoverLetter(): Promise<Response<Record<never, never
       profile,
     } as never);
 
-    if (fillResult === null) {
-      // No content script reachable — return text so popup can at least display it.
-      return { ok: false, error: "Cover letter generated but no fillable field was found on this page." };
+    if (fillResult !== null) {
+      filled = (fillResult as { ok: boolean }).ok === true;
     }
 
-    return { ok: true };
+    return { ok: true, text: generatedText, filled };
   } catch (err) {
     return { ok: false, error: String(err) };
   }

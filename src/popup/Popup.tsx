@@ -76,6 +76,8 @@ export function Popup() {
   const [error, setError] = useState<string | null>(null);
   const [fillDone, setFillDone] = useState(false);
   const [coverLetterDone, setCoverLetterDone] = useState(false);
+  const [coverLetterText, setCoverLetterText] = useState<string | null>(null);
+  const [coverLetterFilled, setCoverLetterFilled] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -165,13 +167,17 @@ export function Popup() {
     setPhase("generating");
     setError(null);
     setCoverLetterDone(false);
+    setCoverLetterText(null);
+    setCoverLetterFilled(false);
     try {
-      const res = await sendMsg<{ ok: boolean; error?: string }>(
+      const res = await sendMsg<{ ok: boolean; text?: string; filled?: boolean; error?: string }>(
         { type: "GENERATE_COVER_LETTER" },
-        60_000, // generation can take a few seconds
+        60_000,
       );
       if (!res.ok) throw new Error(res.error ?? "Generation failed");
       setCoverLetterDone(true);
+      setCoverLetterText(res.text ?? null);
+      setCoverLetterFilled(res.filled ?? false);
     } catch (err) {
       setError(String(err));
     } finally {
@@ -263,9 +269,26 @@ export function Popup() {
         )}
 
         {/* Cover letter done */}
-        {coverLetterDone && !error && (
+        {coverLetterDone && !error && coverLetterFilled && (
           <div className="popup-alert popup-alert-success px-3 py-2 text-xs">
             Cover letter generated and filled.
+          </div>
+        )}
+        {coverLetterDone && !error && !coverLetterFilled && coverLetterText && (
+          <div className="popup-alert popup-alert-warning px-3 py-2 text-xs space-y-1.5">
+            <p className="font-semibold">Generated — no field found to fill. Copy it below:</p>
+            <textarea
+              readOnly
+              value={coverLetterText}
+              rows={6}
+              className="w-full rounded border border-amber-200 bg-white px-2 py-1.5 text-xs text-gray-700 resize-none focus:outline-none"
+            />
+            <button
+              onClick={() => navigator.clipboard.writeText(coverLetterText)}
+              className="text-indigo-600 hover:underline text-xs"
+            >
+              Copy to clipboard
+            </button>
           </div>
         )}
 

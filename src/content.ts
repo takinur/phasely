@@ -96,12 +96,40 @@ chrome.runtime.onMessage.addListener(
             const profile = msg.profile as Profile
             const key = msg.key as string
             const value = msg.value as string
+
+            // Primary: look for the field the detector matched to this AI key.
             const fields = detectFields(profile)
-            const target = fields.find((f: DetectedField) => f.profileKey === key && f.isAiField)
+            let target = fields.find((f: DetectedField) => f.profileKey === key && f.isAiField)
+
+            // Fallback: when no labelled AI field is found, pick the largest
+            // visible textarea on the page — almost always the cover letter box.
             if (!target) {
-              sendResponse({ ok: false, error: `No field found for key "${key}"` })
+              const allTextareas = Array.from(document.querySelectorAll<HTMLTextAreaElement>("textarea"))
+              const visible = allTextareas.filter((el) => {
+                if (el.offsetParent === null) return false
+                const style = window.getComputedStyle(el)
+                return style.display !== "none" && style.visibility !== "hidden"
+              })
+              // Pick the one with the most rows / largest scrollHeight as a proxy for "cover letter box".
+              const largest = visible.sort((a, b) => b.scrollHeight - a.scrollHeight)[0]
+              if (largest) {
+                target = {
+                  element: largest,
+                  profileKey: key,
+                  confidence: 0.5,
+                  currentValue: largest.value,
+                  suggestedValue: value,
+                  isAiField: true,
+                  fieldType: "textarea",
+                }
+              }
+            }
+
+            if (!target) {
+              sendResponse({ ok: false, error: `No cover letter field found on this page.` })
               break
             }
+
             fillField({ ...target, suggestedValue: value })
             sendResponse({ ok: true })
             break
