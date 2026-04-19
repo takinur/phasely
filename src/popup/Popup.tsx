@@ -19,7 +19,9 @@ type MsgPayload =
   | { type: "GET_PROFILE" }
   | { type: "GET_SETTINGS" }
   | { type: "GET_RESUME" }
+  | { type: "GET_GEMINI_MODELS" }
   | { type: "FILL_ALL"; profile: Profile }
+  | { type: "GENERATE_COVER_LETTER" }
   | { type: "SUBMIT"; settings?: Pick<ExtensionSettings, "confirmBeforeSubmit"> };
 
 function sendMsg<T = unknown>(payload: MsgPayload, timeoutMs = 20_000): Promise<T> {
@@ -63,30 +65,34 @@ function StatusDot({ ok }: { ok: boolean }) {
 // Main component
 // ---------------------------------------------------------------------------
 
-type Phase = "idle" | "filling" | "submitting";
+type Phase = "idle" | "filling" | "submitting" | "generating";
 
 export function Popup() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [settings, setSettings] = useState<ExtensionSettings | null>(null);
   const [hasResume, setHasResume] = useState(false);
+  const [apiKeySet, setApiKeySet] = useState(false);
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState<string | null>(null);
   const [fillDone, setFillDone] = useState(false);
+  const [coverLetterDone, setCoverLetterDone] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
 
     (async () => {
       try {
-        const [pRes, rRes, sRes] = await Promise.all([
+        const [pRes, rRes, sRes, gRes] = await Promise.all([
           sendMsg<{ ok: boolean; profile: Profile | null }>({ type: "GET_PROFILE" }),
           sendMsg<{ ok: boolean; resume: StoredResume | null }>({ type: "GET_RESUME" }),
           sendMsg<{ ok: boolean; settings: ExtensionSettings }>({ type: "GET_SETTINGS" }),
+          sendMsg<{ ok: boolean; apiKeySet: boolean; models: string[] }>({ type: "GET_GEMINI_MODELS" }),
         ]);
         if (cancelled) return;
         if (pRes.ok) setProfile(pRes.profile);
         if (rRes.ok) setHasResume(rRes.resume !== null);
         if (sRes.ok) setSettings(sRes.settings);
+        if (gRes.ok) setApiKeySet(gRes.apiKeySet);
       } catch (err) {
         if (!cancelled) setError(String(err));
       }
@@ -155,10 +161,29 @@ export function Popup() {
     }
   }, [profile, settings]);
 
+  const handleGenerateCoverLetter = useCallback(async () => {
+    setPhase("generating");
+    setError(null);
+    setCoverLetterDone(false);
+    try {
+      const res = await sendMsg<{ ok: boolean; error?: string }>(
+        { type: "GENERATE_COVER_LETTER" },
+        60_000, // generation can take a few seconds
+      );
+      if (!res.ok) throw new Error(res.error ?? "Generation failed");
+      setCoverLetterDone(true);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setPhase("idle");
+    }
+  }, []);
+
   const hasProfile = profile !== null;
   const isWorking = phase !== "idle";
   // Fill only requires a profile; resume is optional (file fields are skipped gracefully when absent).
   const canFill = hasProfile && !isWorking;
+  const canGenerate = hasProfile && apiKeySet && !isWorking;
 
   return (
     <div className="popup-shell w-80 min-h-36 text-sm flex flex-col">
@@ -237,6 +262,13 @@ export function Popup() {
           </div>
         )}
 
+        {/* Cover letter done */}
+        {coverLetterDone && !error && (
+          <div className="popup-alert popup-alert-success px-3 py-2 text-xs">
+            Cover letter generated and filled.
+          </div>
+        )}
+
         {/* Primary actions */}
         <div className="flex gap-2">
           <button
@@ -288,6 +320,32 @@ export function Popup() {
             ].join(" ")}
           >
             {phase === "submitting" ? "Submitting…" : "Submit Application"}
+          </button>
+        )}
+
+        {/* Generate cover letter — requires profile + Gemini API key */}
+        {hasProfile && (
+          <button
+            onClick={handleGenerateCoverLetter}
+            disabled={!canGenerate}
+            title={!apiKeySet ? "Add a Gemini API key in Settings → AI Settings to enable" : undefined}
+            className={[
+              "w-full rounded-md px-3 py-2 text-sm font-medium border transition-all duration-150 flex items-center justify-center gap-1.5",
+              canGenerate
+                ? "popup-btn-secondary"
+                : "popup-btn-disabled cursor-not-allowed opacity-50",
+            ].join(" ")}
+          >
+            {phase === "generating" ? (
+              "Generating…"
+            ) : (
+              <>
+                <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                  <path fillRule="evenodd" d="M9.243 3.03a1 1 0 01.727 1.213L9.53 6h2.94l.56-2.243a1 1 0 111.94.486L14.53 6H17a1 1 0 110 2h-2.97l-1 4H15a1 1 0 110 2h-2.47l-.56 2.243a1 1 0 11-1.94-.486L10.47 14H7.53l-.56 2.243a1 1 0 11-1.94-.486L5.47 14H3a1 1 0 110-2h2.97l1-4H5a1 1 0 110-2h2.47l.56-2.243a1 1 0 011.213-.727zM9.03 8l-1 4h2.938l1-4H9.031z" clipRule="evenodd" />
+                </svg>
+                Generate Cover Letter
+              </>
+            )}
           </button>
         )}
       </div>

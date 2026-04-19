@@ -90,6 +90,23 @@ chrome.runtime.onMessage.addListener(
             break
           }
 
+          case "FILL_AI_TEXT": {
+            // Fill a single AI-generated value into the matching field on the page.
+            // The SW generates the text and sends it here to inject into the DOM.
+            const profile = msg.profile as Profile
+            const key = msg.key as string
+            const value = msg.value as string
+            const fields = detectFields(profile)
+            const target = fields.find((f: DetectedField) => f.profileKey === key && f.isAiField)
+            if (!target) {
+              sendResponse({ ok: false, error: `No field found for key "${key}"` })
+              break
+            }
+            fillField({ ...target, suggestedValue: value })
+            sendResponse({ ok: true })
+            break
+          }
+
           case "SUBMIT": {
             // submitForm needs settings — default to confirmBeforeSubmit: true
             // when called without settings so the user always sees the dialog.

@@ -10,6 +10,7 @@
  */
 
 import { getProfile, setProfile, getResume, setResume, getSettings, setSettings, getGeminiApiKey, setGeminiApiKey, wipeAll, getPresets, setPresets } from "@/lib/storage";
+import { COVER_LETTER_SYSTEM, COVER_LETTER_USER } from "@/lib/prompts";
 import { DEFAULT_SETTINGS } from "@/lib/defaults";
 import type { StoredResume } from "@/lib/types";
 import { parseProfile, ProfileParseError } from "@/lib/profile";
@@ -43,6 +44,7 @@ export type Message =
   | { type: "SAVE_SETTINGS"; settings: ExtensionSettings }
   | { type: "GET_GEMINI_MODELS" }
   | { type: "SAVE_GEMINI_API_KEY"; apiKey: string }
+  | { type: "GENERATE_COVER_LETTER" }
   | { type: "GET_PRESETS" }
   | { type: "SAVE_PRESETS"; presets: ProfilePreset[] }
   | { type: "WIPE_DATA" };
@@ -267,6 +269,74 @@ async function handleGetGeminiModels(): Promise<Response<{ apiKeySet: boolean; m
   }
 }
 
+async function handleGenerateCoverLetter(): Promise<Response<Record<never, never>>> {
+  try {
+    // 1. Get profile and API key from storage.
+    const [profile, apiKey, settings] = await Promise.all([
+      getProfile(),
+      getGeminiApiKey(),
+      getSettings(),
+    ]);
+    if (!profile) return { ok: false, error: "No profile saved. Add your profile in Settings first." };
+    if (!apiKey) return { ok: false, error: "No Gemini API key saved. Add one in Settings → AI Settings." };
+
+    const model = settings?.geminiModel ?? "gemini-1.5-flash";
+
+    // 2. Get job context from the active tab via the content script.
+    const tabResult = await forwardToActiveTab({ type: "DETECT_FIELDS", profile });
+    const jobContext = (tabResult as { jobContext?: { title: string; company: string; location: string; description: string; url: string } } | null)?.jobContext ?? {
+      title: "the role",
+      company: "the company",
+      location: "",
+      description: "",
+      url: "",
+    };
+
+    // 3. Call Gemini generateContent REST API.
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+    const body = {
+      system_instruction: { parts: [{ text: COVER_LETTER_SYSTEM }] },
+      contents: [{ role: "user", parts: [{ text: COVER_LETTER_USER(profile, jobContext) }] }],
+    };
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      return { ok: false, error: `Gemini error (${response.status}): ${text}` };
+    }
+
+    const data = (await response.json()) as {
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+    };
+    const generatedText = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? "";
+    if (!generatedText) return { ok: false, error: "Gemini returned an empty response." };
+
+    debug("GENERATE_COVER_LETTER: generated", generatedText.length, "chars");
+
+    // 4. Inject the text into the cover letter field on the active tab.
+    const fillResult = await forwardToActiveTab({
+      type: "FILL_AI_TEXT" as never,
+      key: "coverLetter",
+      value: generatedText,
+      profile,
+    } as never);
+
+    if (fillResult === null) {
+      // No content script reachable — return text so popup can at least display it.
+      return { ok: false, error: "Cover letter generated but no fillable field was found on this page." };
+    }
+
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
 async function handleSaveGeminiApiKey(
   apiKey: string,
 ): Promise<Response<Record<never, never>>> {
@@ -422,6 +492,10 @@ chrome.runtime.onMessage.addListener(
 
           case "SAVE_GEMINI_API_KEY":
             sendResponse(await handleSaveGeminiApiKey(msg.apiKey));
+            break;
+
+          case "GENERATE_COVER_LETTER":
+            sendResponse(await handleGenerateCoverLetter());
             break;
 
           case "GET_PRESETS":

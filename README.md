@@ -139,7 +139,7 @@ ATS-specific adapters (Greenhouse, Lever, Workday) run targeted fills on top of 
 
 ```
 src/
-  background/sw.ts        Service worker — message router, storage ops, OAuth
+  background/sw.ts        Service worker — message router, storage ops, Gemini API key + model fetch
   content/
     detector.ts           DOM scan → scored DetectedField[]
     filler.ts             Write values + fire SPA-compatible events
@@ -155,7 +155,7 @@ src/
     storage.ts            AES-GCM encrypt/decrypt + chrome.storage wrappers
     types.ts              Shared TypeScript interfaces
     defaults.ts           Extension defaults
-    gemini.ts             GeminiClient (architecture-ready, dormant in v1)
+    gemini.ts             Gemini client module (generation path scaffolded)
     prompts.ts            Cover letter + behavioural question prompt templates
   popup/                  Extension popup UI
   options/                Settings + profile management page
@@ -185,19 +185,24 @@ Load unpacked from `dist/` in `chrome://extensions` with Developer mode on.
 
 ---
 
-## AI features (Google Gemini — in progress)
+## AI features (Google Gemini API key)
 
-Gemini-powered cover letter and open-question generation is in the works. The OAuth plumbing is already wired — it calls the Generative Language API directly from your browser using your Google account. No Phasely servers involved.
+Gemini configuration now uses an API key from Google AI Studio (no OAuth sign-in flow in Phasely).
 
-To enable during development:
+Current status:
 
-1. Google Cloud Console → Enable **Generative Language API**
-2. Configure OAuth consent screen → add your account as a test user
-3. Create OAuth client credentials for the Chrome extension
-4. Replace `oauth2.client_id` in `manifest.json`
-5. Reload extension → **Sign in with Google** in Options
+- You can store an encrypted Gemini API key in Options.
+- Phasely uses that key to fetch available Gemini models and populate model selection.
+- Cover letter/open-question generation remains scaffolded and will be fully activated in a follow-up release.
 
-The Claude API integration is architecturally ready (see `sw.ts` and `gemini.ts`) but dormant in v1 — it will be activated in a future release.
+Setup:
+
+1. Open Google AI Studio: **https://aistudio.google.com/app/apikey**
+2. Create a Gemini API key
+3. In Phasely Options → **AI Settings**, paste the key and click **Save API key**
+4. In **Extension Settings**, pick your Gemini model
+
+No Phasely servers are involved in this flow.
 
 ---
 
