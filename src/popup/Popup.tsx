@@ -62,6 +62,64 @@ function StatusDot({ ok }: { ok: boolean }) {
 }
 
 // ---------------------------------------------------------------------------
+// Cover letter result panel
+// ---------------------------------------------------------------------------
+
+function CoverLetterResult({ text, filled }: { text: string; filled: boolean }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = useCallback(() => {
+    // Primary: Clipboard API (works in popup with user gesture)
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text).then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      }).catch(() => fallbackCopy());
+    } else {
+      fallbackCopy();
+    }
+
+    function fallbackCopy() {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.cssText = "position:fixed;top:0;left:0;opacity:0";
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      try {
+        document.execCommand("copy");
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      } finally {
+        document.body.removeChild(ta);
+      }
+    }
+  }, [text]);
+
+  return (
+    <div className="rounded-md border border-gray-200 bg-gray-50 p-2.5 space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-medium text-gray-700">
+          {filled ? "✓ Filled into form" : "No field found — copy manually"}
+        </span>
+        <button
+          onClick={handleCopy}
+          className="text-xs font-medium text-indigo-600 hover:text-indigo-800 transition-colors"
+        >
+          {copied ? "Copied!" : "Copy"}
+        </button>
+      </div>
+      <textarea
+        readOnly
+        value={text}
+        rows={6}
+        className="w-full rounded border border-gray-200 bg-white px-2 py-1.5 text-xs text-gray-800 leading-relaxed resize-none focus:outline-none focus:ring-1 focus:ring-indigo-400"
+      />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
 
@@ -268,30 +326,6 @@ export function Popup() {
           </div>
         )}
 
-        {/* Cover letter done */}
-        {coverLetterDone && !error && coverLetterFilled && (
-          <div className="popup-alert popup-alert-success px-3 py-2 text-xs">
-            Cover letter generated and filled.
-          </div>
-        )}
-        {coverLetterDone && !error && !coverLetterFilled && coverLetterText && (
-          <div className="popup-alert popup-alert-warning px-3 py-2 text-xs space-y-1.5">
-            <p className="font-semibold">Generated — no field found to fill. Copy it below:</p>
-            <textarea
-              readOnly
-              value={coverLetterText}
-              rows={6}
-              className="w-full rounded border border-amber-200 bg-white px-2 py-1.5 text-xs text-gray-700 resize-none focus:outline-none"
-            />
-            <button
-              onClick={() => navigator.clipboard.writeText(coverLetterText)}
-              className="text-indigo-600 hover:underline text-xs"
-            >
-              Copy to clipboard
-            </button>
-          </div>
-        )}
-
         {/* Primary actions */}
         <div className="flex gap-2">
           <button
@@ -370,6 +404,11 @@ export function Popup() {
               </>
             )}
           </button>
+        )}
+
+        {/* Cover letter result — always shown below the button when text exists */}
+        {coverLetterDone && !error && coverLetterText && (
+          <CoverLetterResult text={coverLetterText} filled={coverLetterFilled} />
         )}
       </div>
     </div>
