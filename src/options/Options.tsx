@@ -959,7 +959,7 @@ export function Options() {
         {/* Introduction */}
         <div className="options-hero rounded-xl border border-indigo-100 bg-linear-to-br from-indigo-50 to-white dark:bg-gray-800 px-5 py-4 flex items-center justify-between gap-4">
           <p className="text-sm text-gray-600">
-            Write your profile once — Phasely fills Workday, Greenhouse, Lever, iCIMS and more in one click. Encrypted locally, zero telemetry.
+            Write your profile once — Phasely fills job application forms in one click. Encrypted locally, zero telemetry.
           </p>
           <div className="flex shrink-0 gap-2 text-xs text-gray-400">
             <span className="flex items-center gap-1">

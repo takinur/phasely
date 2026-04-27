@@ -13,7 +13,7 @@
 
 Job applications are already exhausting. Pasting your email address into the 40th form shouldn't be part of it.
 
-Phasely fills job application forms automatically — Workday, Greenhouse, Lever, iCIMS, LinkedIn Easy Apply, Ashby, and more — from a single encrypted markdown profile you write once and never touch again. It also generates tailored cover letters using Google Gemini, pulling the job description directly from the page.
+Phasely fills job application forms automatically from a single encrypted markdown profile you write once and never touch again. It also generates tailored cover letters using Google Gemini, pulling the job description directly from the page.
 
 No accounts. No servers. No subscription. No nonsense.
 
