@@ -101,7 +101,7 @@ profile.md  ──►  parse & validate      src/lib/profile.ts
 
 Field detection is heuristic — each field is scored across ten signals (`label` text, `name`, `id`, `placeholder`, `aria-label`, `autocomplete`, and more) and matched against hundreds of profile key aliases. No hard-coded selectors. Adapts to form variations without breaking.
 
-ATS-specific adapters (Greenhouse, Lever, Workday) run targeted fills on top of the generic pass, using each platform's known `name=` patterns and `data-automation-id` attributes. Workday's shadow DOM is traversed recursively.
+ATS-specific adapters run targeted fills on top of the generic pass, using each platform's known `name=` patterns and `data-automation-id` attributes. Shadow-DOM-based pages are traversed recursively.
 
 ---
 
@@ -167,10 +167,7 @@ src/
     detector.ts           DOM scan → scored DetectedField[], job context scraping
     filler.ts             Write values + fire SPA-compatible events
     submitter.ts          Detect submit button, click, poll for success
-    adapters/
-      greenhouse.ts       Greenhouse-specific targeted fills
-      lever.ts            Lever-specific targeted fills
-      workday.ts          Workday shadow DOM traversal + targeted fills
+    adapters/             ATS-specific targeted fills (shadow DOM traversal where needed)
   lib/
     fieldMap.ts           Canonical field keys + alias resolution (~24 keys, hundreds of aliases)
     fuzzyMatch.ts         Confidence scoring (exact → Levenshtein → token overlap)
