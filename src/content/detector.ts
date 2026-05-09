@@ -3,7 +3,6 @@
  * scores each against FIELD_MAP keys, and returns DetectedField[] sorted
  * by confidence descending.
  *
- * Shadow DOM traversal is supported for Workday compatibility.
  * Hidden fields (display:none, visibility:hidden, type=hidden) are skipped.
  */
 
@@ -191,7 +190,7 @@ function profileValueFor(key: string, profile: Profile): string {
 
 /**
  * Collect all fillable elements from a root node, recursing into any
- * shadow roots found along the way (Workday compatibility).
+ * shadow roots found along the way.
  */
 function collectElements(root: Document | ShadowRoot | Element): HTMLElement[] {
   const results: HTMLElement[] = []
@@ -247,7 +246,7 @@ function collectElements(root: Document | ShadowRoot | Element): HTMLElement[] {
  * description, url) from the current page.
  *
  * Strategy (best-effort, graceful degradation):
- *   1. JSON-LD structured data (most reliable — Greenhouse, Lever, many ATS)
+ *   1. JSON-LD structured data (most reliable on major ATSs)
  *   2. Open Graph / meta tags
  *   3. Common CSS class / data-attribute patterns used by major ATSs
  *   4. Page title heuristic as last resort
@@ -323,42 +322,30 @@ export function scrapeJobContext(): JobContext | null {
     }
 
     const domTitle = firstText(
-      // Greenhouse
       "[data-qa='job-title']",
       ".job-post__heading",
-      // Lever
       ".posting-headline h2",
       ".posting-title h2",
-      // Workday
       "[data-automation-id='jobPostingHeader']",
-      // iCIMS
       ".iCIMS_Header h1",
-      // SmartRecruiters
       ".job-title h1",
-      // Generic fallbacks
       "h1.job-title",
       "h1[class*='title']",
       "h1",
     )
 
     const domCompany = firstText(
-      // Greenhouse
       "[data-qa='company-name']",
       ".company-name",
-      // Lever
-      ".main-header-logo img[alt]",     // alt attribute used below
+      ".main-header-logo img[alt]",
       ".posting-categories .location",
-      // Workday
       "[data-automation-id='company-name']",
-      // SmartRecruiters
       ".company-name",
-      // Generic
       "[class*='company']",
     )
 
-    // Lever stores company name in the logo alt
-    const leverLogoEl = document.querySelector<HTMLImageElement>(".main-header-logo img")
-    const leverCompany = leverLogoEl?.alt?.trim() ?? ""
+    const logoEl = document.querySelector<HTMLImageElement>(".main-header-logo img")
+    const logoCompany = logoEl?.alt?.trim() ?? ""
 
     const domLocation = firstText(
       "[data-qa='job-location']",
@@ -384,7 +371,7 @@ export function scrapeJobContext(): JobContext | null {
 
     // Assemble best-effort result
     const title = domTitle || ogTitle || pageTitle
-    const company = domCompany || leverCompany
+    const company = domCompany || logoCompany
     const location = domLocation
     const description = domDescription || ogDescription || metaDescription
 
