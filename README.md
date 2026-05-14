@@ -42,7 +42,7 @@ firstName: Alex
 lastName: Chen
 email: alex@example.com
 
-# Everything below is optional — skip what doesn't apply
+# Everything below is optional — but improves field detection accuracy and unlocks AI features
 phone: +1 415 555 0192
 location: San Francisco, CA
 currentTitle: Senior Software Engineer
