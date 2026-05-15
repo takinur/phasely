@@ -216,4 +216,4 @@ PRs and issues are welcome. The codebase is intentionally straightforward to ext
 
 ## License
 
-MIT
+MIT License. See [LICENSE](LICENSE).
