@@ -150,6 +150,38 @@ export function setSelectValue(el: HTMLSelectElement, value: string): void {
 }
 
 /**
+ * Expand a value into the set of equivalent strings a form might use to
+ * represent it. Booleans are the important case: a profile stores
+ * `willingToRelocate: true`, but the form asks "Willing to relocate?" with
+ * radios labelled "Yes" / "No". Without this mapping, "true" never matches
+ * a "Yes" radio and the group is left blank.
+ */
+function valueSynonyms(value: string): Set<string> {
+  const n = value.trim().toLowerCase()
+  if (n === "true" || n === "yes" || n === "y" || n === "1") {
+    return new Set(["true", "yes", "y", "1"])
+  }
+  if (n === "false" || n === "no" || n === "n" || n === "0") {
+    return new Set(["false", "no", "n", "0"])
+  }
+  return new Set([n])
+}
+
+/** Best-effort visible label text for a radio/checkbox input. */
+function labelTextFor(el: HTMLInputElement): string {
+  if (el.id) {
+    const labelEl = document.querySelector<HTMLLabelElement>(
+      `label[for="${CSS.escape(el.id)}"]`
+    )
+    const text = labelEl?.textContent?.trim()
+    if (text) return text.toLowerCase()
+  }
+  const closestLabel = el.closest("label")
+  const text = closestLabel?.textContent?.trim()
+  return text ? text.toLowerCase() : ""
+}
+
+/**
  * Set a checkbox input's checked state.
  */
 export function setCheckbox(el: HTMLInputElement, value: boolean): void {
@@ -169,38 +201,37 @@ export function setCheckbox(el: HTMLInputElement, value: boolean): void {
  */
 export function setRadio(els: HTMLInputElement[], value: string): void {
   try {
-    const normalValue = value.trim().toLowerCase()
+    const wanted = valueSynonyms(value)
     let matched = false
 
+    // Pass 1: exact match on value attribute or label text (via synonyms).
     for (const radio of els) {
       const radioValue = radio.value.trim().toLowerCase()
+      const labelText = labelTextFor(radio)
 
-      // Try matching by value attribute first
-      let isMatch = radioValue === normalValue
-
-      // Fall back to label text if available
-      if (!isMatch && radio.id) {
-        const labelEl = document.querySelector<HTMLLabelElement>(
-          `label[for="${CSS.escape(radio.id)}"]`
-        )
-        if (labelEl?.textContent) {
-          isMatch = labelEl.textContent.trim().toLowerCase() === normalValue
-        }
-      }
-
-      if (!isMatch) {
-        const closestLabel = radio.closest("label")
-        if (closestLabel?.textContent) {
-          isMatch = closestLabel.textContent.trim().toLowerCase() === normalValue
-        }
-      }
-
-      if (isMatch) {
+      if (wanted.has(radioValue) || (labelText && wanted.has(labelText))) {
         radio.checked = true
         dispatchInputEvents(radio)
         matched = true
-        debug(`setRadio: selected value "${radio.value}" in group "${radio.name}"`)
+        debug(`setRadio: selected "${radio.value}" in group "${radio.name}"`)
         break
+      }
+    }
+
+    // Pass 2: substring fallback for multi-word labels
+    // (e.g. value "Remote" vs label "Fully remote"). Skipped for booleans,
+    // where an exact Yes/No answer must not be approximated.
+    if (!matched && wanted.size === 1) {
+      const normalValue = value.trim().toLowerCase()
+      for (const radio of els) {
+        const labelText = labelTextFor(radio)
+        if (labelText && (labelText.includes(normalValue) || normalValue.includes(labelText))) {
+          radio.checked = true
+          dispatchInputEvents(radio)
+          matched = true
+          debug(`setRadio: fuzzy-selected "${radio.value}" in group "${radio.name}"`)
+          break
+        }
       }
     }
 
@@ -264,9 +295,18 @@ export function fillField(field: DetectedField): void {
           return
         }
 
-        // Radio buttons — caller should handle grouping; single-element path
+        // Radio buttons — resolve the whole group by shared name so the
+        // correct option is chosen, not just the one element the detector
+        // happened to match. Booleans map to Yes/No via valueSynonyms.
         if (inputEl.type === "radio") {
-          setRadio([inputEl], suggestedValue)
+          const group = inputEl.name
+            ? Array.from(
+                document.querySelectorAll<HTMLInputElement>(
+                  `input[type="radio"][name="${CSS.escape(inputEl.name)}"]`
+                )
+              )
+            : [inputEl]
+          setRadio(group, suggestedValue)
           return
         }
 
