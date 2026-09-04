@@ -37,7 +37,6 @@ export type Message =
   | { type: "FILL_ONLY"; fields: string[]; profile: Profile }
   | { type: "FILL_AI_TEXT"; key: string; value: string; profile: Profile }
   | { type: "SUBMIT"; settings?: Pick<ExtensionSettings, "confirmBeforeSubmit"> }
-  | { type: "GENERATE_AI"; question: string; fieldKey: string }
   | { type: "GET_PROFILE" }
   | { type: "SAVE_PROFILE"; markdown: string }
   | { type: "GET_RESUME" }
@@ -175,10 +174,6 @@ async function handleSubmit(
   }
 }
 
-function handleGenerateAI(): ErrResponse {
-  return { ok: false, error: "AI not activated" };
-}
-
 async function handleGetProfile(): Promise<Response<{ profile: Profile | null }>> {
   try {
     const profile = await getProfile();
@@ -278,7 +273,7 @@ async function handleGenerateCoverLetter(): Promise<Response<{ text: string; fil
     if (!profile) return { ok: false, error: "No profile saved. Add your profile in Settings first." };
     if (!apiKey) return { ok: false, error: "No Gemini API key saved. Add one in Settings → AI Settings." };
 
-    const model = settings?.geminiModel ?? "gemini-1.5-flash";
+    const model = settings?.geminiModel ?? DEFAULT_SETTINGS.geminiModel;
 
     // 2. Get job context from the active tab — dedicated message, no profile sent.
     const ctxResult = await forwardToActiveTab({ type: "GET_JOB_CONTEXT" });
@@ -452,10 +447,6 @@ chrome.runtime.onMessage.addListener(
 
           case "SUBMIT":
             sendResponse(await handleSubmit(msg.settings));
-            break;
-
-          case "GENERATE_AI":
-            sendResponse(handleGenerateAI());
             break;
 
           case "GET_PROFILE":

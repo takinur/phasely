@@ -101,8 +101,6 @@ profile.md  ──►  parse & validate      src/lib/profile.ts
 
 Field detection is heuristic — each field is scored across ten signals (`label` text, `name`, `id`, `placeholder`, `aria-label`, `autocomplete`, and more) and matched against hundreds of profile key aliases. No hard-coded selectors. Adapts to form variations without breaking.
 
-ATS-specific adapters run targeted fills on top of the generic pass, using each platform's known `name=` patterns and `data-automation-id` attributes. Shadow-DOM-based pages are traversed recursively.
-
 ---
 
 ## AI — cover letter generation
@@ -112,7 +110,7 @@ Phasely can generate a tailored cover letter from the popup using **Google Gemin
 **How it works:**
 
 1. Your profile markdown (work history, skills, summary) is used as the candidate background.
-2. The job title, company, and description are scraped live from the active tab — JSON-LD, Open Graph meta, and ATS-specific DOM selectors are all tried.
+2. The job title, company, and description are scraped live from the active tab — JSON-LD, Open Graph meta, and common DOM selectors are all tried.
 3. Gemini generates a concise, human-sounding cover letter (three paragraphs, ~200 words) tailored to that specific role.
 4. The result is injected into the cover letter field on the page and shown in the popup for copying.
 
@@ -141,7 +139,7 @@ Your API key is AES-GCM encrypted on-device and never leaves your browser. All G
 
 - **You can read exactly what it does with your data.** (Short answer: encrypts it locally and never sends it anywhere.)
 - **No lock-in.** Your profile is a plain text file you own completely.
-- **Contributions welcome.** Adding a new ATS adapter, field alias, or detection heuristic takes maybe 20 lines.
+- **Contributions welcome.** Adding a new field alias or detection heuristic takes maybe 20 lines.
 
 ---
 
@@ -167,7 +165,6 @@ src/
     detector.ts           DOM scan → scored DetectedField[], job context scraping
     filler.ts             Write values + fire SPA-compatible events
     submitter.ts          Detect submit button, click, poll for success
-    adapters/             ATS-specific targeted fills (shadow DOM traversal where needed)
   lib/
     fieldMap.ts           Canonical field keys + alias resolution (~24 keys, hundreds of aliases)
     fuzzyMatch.ts         Confidence scoring (exact → Levenshtein → token overlap)
@@ -209,7 +206,6 @@ Load unpacked from `dist/` in `chrome://extensions` with Developer mode on.
 PRs and issues are welcome. The codebase is intentionally straightforward to extend:
 
 - **New field alias:** add to `src/lib/fieldMap.ts`
-- **New ATS adapter:** add to `src/content/adapters/` — export `detect(): boolean` and `fill(profile): void`
 - **New detection heuristic:** add a signal to `extractSignals()` in `src/content/detector.ts`
 
 ---
