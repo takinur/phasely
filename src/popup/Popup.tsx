@@ -8,7 +8,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import type { ExtensionSettings, JobContext, Profile, StoredResume } from "@/lib/types";
+import type { DetectedField, ExtensionSettings, JobContext, Profile, StoredResume } from "@/lib/types";
 import logoIcon from "@/assets/logo_phasely.png";
 
 // ---------------------------------------------------------------------------
@@ -21,9 +21,56 @@ type MsgPayload =
   | { type: "GET_RESUME" }
   | { type: "GET_GEMINI_MODELS" }
   | { type: "GET_JOB_CONTEXT" }
+  | { type: "DETECT_FIELDS"; profile: Profile }
   | { type: "FILL_ALL"; profile: Profile }
   | { type: "GENERATE_COVER_LETTER" }
   | { type: "SUBMIT"; settings?: Pick<ExtensionSettings, "confirmBeforeSubmit"> };
+
+// ---------------------------------------------------------------------------
+// Detected-field review model
+// ---------------------------------------------------------------------------
+
+/**
+ * Subset of DetectedField that survives the structured-clone message boundary
+ * (the DOM `element` reference is dropped in transit — the popup never needs it).
+ */
+type FieldSummary = Pick<
+  DetectedField,
+  "profileKey" | "confidence" | "suggestedValue" | "isAiField" | "fieldType"
+>;
+
+/** Confidence at or above this is treated as a high-confidence "green" fill. */
+const GREEN_THRESHOLD = 0.75;
+
+/** Friendly labels for canonical profile keys. */
+const KEY_LABELS: Record<string, string> = {
+  firstName: "First name",
+  lastName: "Last name",
+  email: "Email",
+  phone: "Phone",
+  location: "Location",
+  linkedin: "LinkedIn",
+  github: "GitHub",
+  portfolio: "Portfolio",
+  workAuth: "Work authorization",
+  noticePeriod: "Notice period",
+  salaryExpectation: "Salary expectation",
+  willingToRelocate: "Willing to relocate",
+  remotePreference: "Remote preference",
+  currentTitle: "Current title",
+  currentCompany: "Current company",
+  yearsExperience: "Years of experience",
+  resumeUrl: "Resume",
+  coverLetter: "Cover letter",
+  additionalInfo: "Additional info",
+};
+
+function labelForKey(key: string): string {
+  if (KEY_LABELS[key]) return KEY_LABELS[key];
+  // Fallback: prettify camelCase → "Camel case"
+  const spaced = key.replace(/([a-z])([A-Z])/g, "$1 $2");
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
 
 function sendMsg<T = unknown>(payload: MsgPayload, timeoutMs = 20_000): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -121,6 +168,78 @@ function CoverLetterResult({ text, filled }: { text: string; filled: boolean }) 
 }
 
 // ---------------------------------------------------------------------------
+// Detected-field review panel
+// ---------------------------------------------------------------------------
+
+function ReviewPanel({ fields }: { fields: FieldSummary[] }) {
+  const [open, setOpen] = useState(false);
+
+  // AI fields (cover letter, etc.) are generated, not "filled" — keep them
+  // out of the confidence tally so the numbers reflect direct fills only.
+  const fillable = fields.filter((f) => !f.isAiField);
+  const green = fillable.filter((f) => f.confidence >= GREEN_THRESHOLD);
+  const amber = fillable.filter((f) => f.confidence < GREEN_THRESHOLD);
+
+  if (fillable.length === 0) return null;
+
+  return (
+    <div className="rounded-md border border-gray-200 bg-white">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between px-2.5 py-2 text-xs"
+      >
+        <span className="font-medium text-gray-700">
+          {fillable.length} field{fillable.length === 1 ? "" : "s"} detected
+        </span>
+        <span className="flex items-center gap-2">
+          <span className="flex items-center gap-1 text-green-700">
+            <span className="inline-block w-2 h-2 rounded-full bg-green-500" />
+            {green.length}
+          </span>
+          {amber.length > 0 && (
+            <span className="flex items-center gap-1 text-amber-700">
+              <span className="inline-block w-2 h-2 rounded-full bg-amber-500" />
+              {amber.length}
+            </span>
+          )}
+          <svg
+            className={["w-3.5 h-3.5 text-gray-400 transition-transform", open ? "rotate-180" : ""].join(" ")}
+            viewBox="0 0 20 20"
+            fill="currentColor"
+            aria-hidden="true"
+          >
+            <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.06l3.71-3.83a.75.75 0 111.08 1.04l-4.25 4.39a.75.75 0 01-1.08 0L5.21 8.27a.75.75 0 01.02-1.06z" clipRule="evenodd" />
+          </svg>
+        </span>
+      </button>
+
+      {open && (
+        <ul className="max-h-44 overflow-y-auto border-t border-gray-100 divide-y divide-gray-50">
+          {[...green, ...amber].map((f, i) => {
+            const isGreen = f.confidence >= GREEN_THRESHOLD;
+            return (
+              <li key={`${f.profileKey}-${i}`} className="flex items-center gap-2 px-2.5 py-1.5 text-xs">
+                <span
+                  className={[
+                    "inline-block w-2 h-2 rounded-full shrink-0",
+                    isGreen ? "bg-green-500" : "bg-amber-500",
+                  ].join(" ")}
+                  title={isGreen ? "High confidence" : "Needs review"}
+                />
+                <span className="text-gray-700 shrink-0">{labelForKey(f.profileKey)}</span>
+                <span className="text-gray-400 truncate ml-auto text-right" title={f.suggestedValue}>
+                  {f.fieldType === "file" ? "résumé" : f.suggestedValue || "—"}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
 
@@ -138,6 +257,7 @@ export function Popup() {
   const [coverLetterDone, setCoverLetterDone] = useState(false);
   const [coverLetterText, setCoverLetterText] = useState<string | null>(null);
   const [coverLetterFilled, setCoverLetterFilled] = useState(false);
+  const [fields, setFields] = useState<FieldSummary[] | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -164,6 +284,29 @@ export function Popup() {
 
     return () => { cancelled = true; };
   }, []);
+
+  // Detect fields on the active tab once a profile is available, so the popup
+  // can show a green/amber review list before the user commits to filling.
+  useEffect(() => {
+    if (!profile) return;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const res = await sendMsg<{ ok: boolean; fields?: FieldSummary[] }>({
+          type: "DETECT_FIELDS",
+          profile,
+        });
+        if (cancelled) return;
+        if (res.ok) setFields(res.fields ?? []);
+      } catch {
+        // Detection is best-effort — a failure here shouldn't block filling.
+        if (!cancelled) setFields([]);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [profile]);
 
   const handleFill = useCallback(async () => {
     if (!profile) return;
@@ -320,6 +463,11 @@ export function Popup() {
             <span className="popup-chip-dot">•</span>
             <span className="truncate popup-chip-role">{profile.currentTitle}</span>
           </div>
+        )}
+
+        {/* Detected-field review — green/amber confidence before filling */}
+        {hasProfile && fields && fields.length > 0 && (
+          <ReviewPanel fields={fields} />
         )}
 
         {/* Error */}

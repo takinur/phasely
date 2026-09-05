@@ -54,7 +54,17 @@ chrome.runtime.onMessage.addListener(
 
           case "DETECT_FIELDS": {
             const profile = msg.profile as Profile | undefined
-            const fields = profile ? detectFields(profile) : []
+            const detected = profile ? detectFields(profile) : []
+            // Strip the live DOM `element` reference — it is not serialisable
+            // across the messaging boundary and the popup only needs the summary.
+            const fields = detected.map((f) => ({
+              profileKey: f.profileKey,
+              confidence: f.confidence,
+              currentValue: f.currentValue,
+              suggestedValue: f.suggestedValue,
+              isAiField: f.isAiField,
+              fieldType: f.fieldType,
+            }))
             const jobContext = scrapeJobContext()
             sendResponse({ ok: true, fields, jobContext })
             break
