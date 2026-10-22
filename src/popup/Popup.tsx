@@ -9,6 +9,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { DetectedField, ExtensionSettings, GhostJobAssessment, JobContext, Profile, StoredResume } from "@/lib/types";
+import { fillReadiness } from "@/lib/profile";
 import { GhostJobBanner } from "@/popup/GhostJobBanner";
 import logoIcon from "@/assets/logo_phasely.png";
 
@@ -324,6 +325,13 @@ export function Popup() {
 
   const handleFill = useCallback(async () => {
     if (!profile) return;
+    // Belt-and-braces: the button is already disabled, but never fill a
+    // partial profile — blank knockout answers get applications auto-rejected.
+    const gate = fillReadiness(profile);
+    if (!gate.ready) {
+      setError(`Add ${gate.missing.join(", ")} in Settings before filling.`);
+      return;
+    }
     setPhase("filling");
     setError(null);
     setFillDone(false);
@@ -359,6 +367,11 @@ export function Popup() {
 
   const handleFillAndSubmit = useCallback(async () => {
     if (!profile) return;
+    const gate = fillReadiness(profile);
+    if (!gate.ready) {
+      setError(`Add ${gate.missing.join(", ")} in Settings before filling.`);
+      return;
+    }
     setPhase("filling");
     setError(null);
     setFillDone(false);
@@ -406,8 +419,16 @@ export function Popup() {
 
   const hasProfile = profile !== null;
   const isWorking = phase !== "idle";
-  // Fill only requires a profile; resume is optional (file fields are skipped gracefully when absent).
-  const canFill = hasProfile && !isWorking;
+
+  // The Options page lets a partial profile save on purpose, so setup is never
+  // a dead end. The fill gate is enforced here instead: a profile missing work
+  // authorization or location would fill those fields blank, and a blank
+  // work-auth answer is exactly the kind of knockout response that gets an
+  // application auto-rejected.
+  const readiness = fillReadiness(profile);
+
+  // Resume stays optional — file fields are skipped gracefully when absent.
+  const canFill = hasProfile && readiness.ready && !isWorking;
   const canGenerate = hasProfile && apiKeySet && !isWorking;
 
   const generateDisabledReason = !hasProfile
@@ -449,6 +470,27 @@ export function Popup() {
               Settings
             </a>{" "}
             to import your profile.
+          </div>
+        )}
+
+        {/* Profile saved but incomplete — name the missing fields rather than
+            just disabling the button with no explanation. */}
+        {hasProfile && !readiness.ready && (
+          <div className="popup-alert popup-alert-warning px-3 py-2 text-xs">
+            <span className="font-semibold">
+              {readiness.missing.length} field
+              {readiness.missing.length === 1 ? "" : "s"} needed before filling.
+            </span>{" "}
+            Add {readiness.missing.join(", ")} in{" "}
+            <a
+              href={chrome.runtime.getURL("src/options.html")}
+              target="_blank"
+              rel="noreferrer"
+              className="underline font-medium"
+            >
+              Settings
+            </a>
+            .
           </div>
         )}
 
