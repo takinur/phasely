@@ -42,6 +42,16 @@ export interface DetectedField {
   // predate the guard stay valid; the detector populates it for every field.
   isKnockout?: boolean
   knockoutCategory?: KnockoutCategory
+
+  /**
+   * Best human-readable label or question text found for this field.
+   *
+   * Carried so the knockout confirm UI can quote the question as the page
+   * actually asks it ("Will you now or in the future require sponsorship?")
+   * rather than a generic category label. Absent when no label-like signal
+   * was found.
+   */
+  labelText?: string
 }
 
 export interface JobContext {
