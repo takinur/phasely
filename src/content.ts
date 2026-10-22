@@ -9,12 +9,15 @@
 
 import { detectFields, scrapeJobContext } from "./content/detector"
 import { fillField, fillFile } from "./content/filler"
+import { collectGhostEvidence } from "./content/ghostSignals"
 import { submitForm } from "./content/submitter"
+import { assessGhostJob } from "./lib/ghostScore"
 import type { DetectedField, Profile, ExtensionSettings } from "./lib/types"
 
 // Re-export modules so the entry point doubles as a barrel (used by tests).
 export * from "./content/detector"
 export * from "./content/filler"
+export * from "./content/ghostSignals"
 export * from "./content/submitter"
 
 // ---------------------------------------------------------------------------
@@ -38,7 +41,7 @@ chrome.runtime.onMessage.addListener(
     }
 
     const msg = message as { type: string } & Record<string, unknown>
-    const contentMessageTypes = new Set(["DETECT_FIELDS", "FILL_ALL", "FILL_ONLY", "FILL_AI_TEXT", "GET_JOB_CONTEXT", "SUBMIT"])
+    const contentMessageTypes = new Set(["DETECT_FIELDS", "FILL_ALL", "FILL_ONLY", "FILL_AI_TEXT", "GET_JOB_CONTEXT", "ASSESS_GHOST_JOB", "SUBMIT"])
     if (!contentMessageTypes.has(msg.type)) {
       return false
     }
@@ -49,6 +52,14 @@ chrome.runtime.onMessage.addListener(
           case "GET_JOB_CONTEXT": {
             const jobContext = scrapeJobContext()
             sendResponse({ ok: true, jobContext })
+            break
+          }
+
+          case "ASSESS_GHOST_JOB": {
+            // Scored entirely in-page. Nothing is sent anywhere.
+            const jobContext = scrapeJobContext()
+            const ghost = assessGhostJob(collectGhostEvidence(jobContext))
+            sendResponse({ ok: true, ghost, jobContext })
             break
           }
 
@@ -66,7 +77,10 @@ chrome.runtime.onMessage.addListener(
               fieldType: f.fieldType,
             }))
             const jobContext = scrapeJobContext()
-            sendResponse({ ok: true, fields, jobContext })
+            // Ghost-job risk rides along on the detect response so the popup
+            // needs one round trip, not two.
+            const ghost = assessGhostJob(collectGhostEvidence(jobContext))
+            sendResponse({ ok: true, fields, jobContext, ghost })
             break
           }
 

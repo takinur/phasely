@@ -8,7 +8,8 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import type { DetectedField, ExtensionSettings, JobContext, Profile, StoredResume } from "@/lib/types";
+import type { DetectedField, ExtensionSettings, GhostJobAssessment, JobContext, Profile, StoredResume } from "@/lib/types";
+import { GhostJobBanner } from "@/popup/GhostJobBanner";
 import logoIcon from "@/assets/logo_phasely.png";
 
 // ---------------------------------------------------------------------------
@@ -258,6 +259,7 @@ export function Popup() {
   const [coverLetterText, setCoverLetterText] = useState<string | null>(null);
   const [coverLetterFilled, setCoverLetterFilled] = useState(false);
   const [fields, setFields] = useState<FieldSummary[] | null>(null);
+  const [ghost, setGhost] = useState<GhostJobAssessment | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -293,15 +295,27 @@ export function Popup() {
 
     (async () => {
       try {
-        const res = await sendMsg<{ ok: boolean; fields?: FieldSummary[] }>({
+        // The ghost-job assessment rides along on this response, so the one
+        // round trip covers both the review list and the risk banner.
+        const res = await sendMsg<{
+          ok: boolean;
+          fields?: FieldSummary[];
+          ghost?: GhostJobAssessment | null;
+        }>({
           type: "DETECT_FIELDS",
           profile,
         });
         if (cancelled) return;
-        if (res.ok) setFields(res.fields ?? []);
+        if (res.ok) {
+          setFields(res.fields ?? []);
+          setGhost(res.ghost ?? null);
+        }
       } catch {
         // Detection is best-effort — a failure here shouldn't block filling.
-        if (!cancelled) setFields([]);
+        if (!cancelled) {
+          setFields([]);
+          setGhost(null);
+        }
       }
     })();
 
@@ -464,6 +478,10 @@ export function Popup() {
             <span className="truncate popup-chip-role">{profile.currentTitle}</span>
           </div>
         )}
+
+        {/* Ghost-job risk — shown above the review list, because it answers
+            "should I fill this at all?" before "did it match my fields?" */}
+        {settings?.ghostJobWarnings !== false && <GhostJobBanner assessment={ghost} />}
 
         {/* Detected-field review — green/amber confidence before filling */}
         {hasProfile && fields && fields.length > 0 && (
