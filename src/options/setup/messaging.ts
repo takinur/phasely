@@ -7,7 +7,7 @@
  * never touches chrome.storage directly.
  */
 
-import type { ExtensionSettings } from "@/lib/types";
+import type { ApplicationRecord, ExtensionSettings } from "@/lib/types";
 
 export type OptionsMessage =
   | { type: "GET_PROFILE" }
@@ -18,7 +18,17 @@ export type OptionsMessage =
   | { type: "SAVE_SETTINGS"; settings: ExtensionSettings }
   | { type: "GET_GEMINI_MODELS" }
   | { type: "SAVE_GEMINI_API_KEY"; apiKey: string }
+  | { type: "GET_APPLICATIONS" }
+  | { type: "CLEAR_APPLICATIONS" }
   | { type: "WIPE_DATA" };
+
+/** Shape of the GET_APPLICATIONS reply, shared by the options-page callers. */
+export interface ApplicationsResponse {
+  ok: boolean;
+  applications?: ApplicationRecord[];
+  dueCount?: number;
+  error?: string;
+}
 
 export function sendMsg<T = unknown>(
   payload: OptionsMessage,

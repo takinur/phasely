@@ -8,9 +8,17 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import type { DetectedField, ExtensionSettings, GhostJobAssessment, JobContext, Profile, StoredResume } from "@/lib/types";
+import type { ApplicationRecord, ApplicationStatus, DetectedField, ExtensionSettings, GhostJobAssessment, JobContext, KnockoutField, Profile, StoredResume } from "@/lib/types";
 import { fillReadiness } from "@/lib/profile";
+import {
+  buildKnockoutFields,
+  describeKnockoutBlock,
+  knockoutFieldId,
+  unconfirmedKnockoutCategories,
+} from "@/lib/knockout";
 import { GhostJobBanner } from "@/popup/GhostJobBanner";
+import KnockoutReview from "@/popup/KnockoutReview";
+import TrackerPanel from "@/popup/TrackerPanel";
 import logoIcon from "@/assets/logo_phasely.png";
 
 // ---------------------------------------------------------------------------
@@ -26,7 +34,15 @@ type MsgPayload =
   | { type: "DETECT_FIELDS"; profile: Profile }
   | { type: "FILL_ALL"; profile: Profile }
   | { type: "GENERATE_COVER_LETTER" }
-  | { type: "SUBMIT"; settings?: Pick<ExtensionSettings, "confirmBeforeSubmit"> };
+  | { type: "GET_APPLICATIONS" }
+  | { type: "UPDATE_APPLICATION_STATUS"; id: string; status: ApplicationStatus }
+  | { type: "DELETE_APPLICATION"; id: string }
+  | {
+      type: "SUBMIT";
+      settings?: Pick<ExtensionSettings, "confirmBeforeSubmit">;
+      knockouts?: KnockoutField[];
+      fieldsFilled?: number;
+    };
 
 // ---------------------------------------------------------------------------
 // Detected-field review model
@@ -38,7 +54,14 @@ type MsgPayload =
  */
 type FieldSummary = Pick<
   DetectedField,
-  "profileKey" | "confidence" | "suggestedValue" | "isAiField" | "fieldType"
+  | "profileKey"
+  | "confidence"
+  | "suggestedValue"
+  | "isAiField"
+  | "fieldType"
+  | "isKnockout"
+  | "knockoutCategory"
+  | "labelText"
 >;
 
 /** Confidence at or above this is treated as a high-confidence "green" fill. */
@@ -261,6 +284,10 @@ export function Popup() {
   const [coverLetterFilled, setCoverLetterFilled] = useState(false);
   const [fields, setFields] = useState<FieldSummary[] | null>(null);
   const [ghost, setGhost] = useState<GhostJobAssessment | null>(null);
+  const [knockouts, setKnockouts] = useState<KnockoutField[]>([]);
+  const [applications, setApplications] = useState<ApplicationRecord[]>([]);
+  const [dueCount, setDueCount] = useState(0);
+  const [trackerError, setTrackerError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -308,20 +335,140 @@ export function Popup() {
         });
         if (cancelled) return;
         if (res.ok) {
-          setFields(res.fields ?? []);
+          const detected = res.fields ?? [];
+          setFields(detected);
           setGhost(res.ghost ?? null);
+          // Always rebuilt from scratch: confirmation is an explicit act on
+          // this page, never carried over from a previous one.
+          setKnockouts(
+            buildKnockoutFields(
+              detected.map((f) => ({ ...f, question: f.labelText })),
+            ),
+          );
         }
       } catch {
         // Detection is best-effort — a failure here shouldn't block filling.
         if (!cancelled) {
           setFields([]);
           setGhost(null);
+          setKnockouts([]);
         }
       }
     })();
 
     return () => { cancelled = true; };
   }, [profile]);
+
+  /**
+   * Read the log. Pure — returns the outcome rather than setting state, so the
+   * mount effect can await it and apply the result after an unmount check.
+   */
+  const fetchApplications = useCallback(async (): Promise<
+    { ok: true; applications: ApplicationRecord[]; dueCount: number } | { ok: false; error: string }
+  > => {
+    try {
+      const res = await sendMsg<{
+        ok: boolean;
+        applications?: ApplicationRecord[];
+        dueCount?: number;
+        error?: string;
+      }>({ type: "GET_APPLICATIONS" });
+      if (!res.ok) throw new Error(res.error ?? "Could not read your application log");
+      return {
+        ok: true,
+        applications: res.applications ?? [],
+        dueCount: res.dueCount ?? 0,
+      };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  }, []);
+
+  const applyApplications = useCallback(
+    (result: Awaited<ReturnType<typeof fetchApplications>>) => {
+      if (result.ok) {
+        setApplications(result.applications);
+        setDueCount(result.dueCount);
+        setTrackerError(null);
+      } else {
+        setTrackerError(result.error);
+      }
+    },
+    [],
+  );
+
+  /** Event-handler entry point: fetch and apply in one call. */
+  const loadApplications = useCallback(async () => {
+    applyApplications(await fetchApplications());
+  }, [fetchApplications, applyApplications]);
+
+  const handleChangeStatus = useCallback(
+    async (id: string, status: ApplicationStatus) => {
+      try {
+        await sendMsg({ type: "UPDATE_APPLICATION_STATUS", id, status });
+        await loadApplications();
+      } catch (err) {
+        setTrackerError(String(err));
+      }
+    },
+    [loadApplications],
+  );
+
+  const handleDeleteApplication = useCallback(
+    async (id: string) => {
+      try {
+        await sendMsg({ type: "DELETE_APPLICATION", id });
+        await loadApplications();
+      } catch (err) {
+        setTrackerError(String(err));
+      }
+    },
+    [loadApplications],
+  );
+
+  const handleToggleKnockout = useCallback(
+    (field: KnockoutField, confirmed: boolean) => {
+      const id = knockoutFieldId(field);
+      setKnockouts((prev) =>
+        prev.map((f) => (knockoutFieldId(f) === id ? { ...f, confirmed } : f)),
+      );
+    },
+    [],
+  );
+
+  const handleConfirmAllKnockouts = useCallback(() => {
+    setKnockouts((prev) => prev.map((f) => ({ ...f, confirmed: true })));
+  }, []);
+
+  const handleEditKnockoutValue = useCallback(
+    (field: KnockoutField, value: string) => {
+      const id = knockoutFieldId(field);
+      // Editing an answer un-confirms it — the user is changing what they are
+      // about to attest to, so the confirm has to be re-made.
+      setKnockouts((prev) =>
+        prev.map((f) =>
+          knockoutFieldId(f) === id
+            ? { ...f, suggestedValue: value, confirmed: false }
+            : f,
+        ),
+      );
+    },
+    [],
+  );
+
+  // Load the application log on mount, unless tracking is switched off.
+  useEffect(() => {
+    if (settings !== null && settings.trackApplications === false) return;
+    let cancelled = false;
+
+    (async () => {
+      const result = await fetchApplications();
+      if (cancelled) return;
+      applyApplications(result);
+    })();
+
+    return () => { cancelled = true; };
+  }, [settings, fetchApplications, applyApplications]);
 
   const handleFill = useCallback(async () => {
     if (!profile) return;
@@ -372,6 +519,18 @@ export function Popup() {
       setError(`Add ${gate.missing.join(", ")} in Settings before filling.`);
       return;
     }
+
+    // Knockout gate. The service worker enforces this too — it reads the flag
+    // from stored settings so a caller cannot override it — but failing here
+    // gives the user the categories to go and look at instead of a bare error.
+    if (settings?.blockSubmitOnUnconfirmedKnockouts !== false) {
+      const pending = unconfirmedKnockoutCategories(knockouts);
+      if (pending.length > 0) {
+        setError(describeKnockoutBlock(pending));
+        return;
+      }
+    }
+
     setPhase("filling");
     setError(null);
     setFillDone(false);
@@ -386,14 +545,19 @@ export function Popup() {
       const submitRes = await sendMsg<{ ok: boolean; error?: string }>({
         type: "SUBMIT",
         settings: { confirmBeforeSubmit: settings?.confirmBeforeSubmit ?? true },
+        knockouts,
+        fieldsFilled: fields?.filter((f) => !f.isAiField).length ?? 0,
       });
       if (!submitRes.ok) throw new Error(submitRes.error ?? "Submit failed");
+      // The SW auto-logs the application on a successful submit; refresh so the
+      // tracker panel reflects it without the user reopening the popup.
+      await loadApplications();
     } catch (err) {
       setError(String(err));
     } finally {
       setPhase("idle");
     }
-  }, [profile, settings]);
+  }, [profile, settings, knockouts, fields, loadApplications]);
 
   const handleGenerateCoverLetter = useCallback(async () => {
     setPhase("generating");
@@ -427,8 +591,22 @@ export function Popup() {
   // application auto-rejected.
   const readiness = fillReadiness(profile);
 
+  // Knockout gate state. The guard is on unless explicitly switched off, so an
+  // older install with no stored value still gets protected.
+  const knockoutGuardOn = settings?.blockSubmitOnUnconfirmedKnockouts !== false;
+  const pendingKnockouts = unconfirmedKnockoutCategories(knockouts);
+  const knockoutBlocked = knockoutGuardOn && pendingKnockouts.length > 0;
+  const knockoutBlockMessage = knockoutBlocked
+    ? describeKnockoutBlock(pendingKnockouts)
+    : undefined;
+
   // Resume stays optional — file fields are skipped gracefully when absent.
   const canFill = hasProfile && readiness.ready && !isWorking;
+
+  // Filling stays available while knockouts are unconfirmed — reviewing the
+  // filled answers in the page is exactly how a user confirms them. Only the
+  // irreversible step is gated.
+  const canSubmit = canFill && !knockoutBlocked;
   const canGenerate = hasProfile && apiKeySet && !isWorking;
 
   const generateDisabledReason = !hasProfile
@@ -525,6 +703,17 @@ export function Popup() {
             "should I fill this at all?" before "did it match my fields?" */}
         {settings?.ghostJobWarnings !== false && <GhostJobBanner assessment={ghost} />}
 
+        {/* Knockout confirm gate. Sits above the field review because it can
+            block submit outright — the user needs to see it first. */}
+        <KnockoutReview
+          fields={knockouts}
+          onToggleConfirm={handleToggleKnockout}
+          onConfirmAll={handleConfirmAllKnockouts}
+          onEditValue={handleEditKnockoutValue}
+          blocked={knockoutBlocked}
+          blockMessage={knockoutBlockMessage}
+        />
+
         {/* Detected-field review — green/amber confidence before filling */}
         {hasProfile && fields && fields.length > 0 && (
           <ReviewPanel fields={fields} />
@@ -570,10 +759,11 @@ export function Popup() {
 
           <button
             onClick={handleFillAndSubmit}
-            disabled={!canFill}
+            disabled={!canSubmit}
+            title={knockoutBlockMessage}
             className={[
               "flex-1 rounded-md px-3 py-2 text-sm font-medium transition-all duration-150",
-              canFill
+              canSubmit
                 ? "popup-btn popup-btn-submit"
                 : "popup-btn-disabled cursor-not-allowed",
             ].join(" ")}
@@ -586,10 +776,11 @@ export function Popup() {
         {hasProfile && (
           <button
             onClick={submitApplication}
-            disabled={isWorking}
+            disabled={isWorking || knockoutBlocked}
+            title={knockoutBlockMessage}
             className={[
               "w-full rounded-md px-3 py-2 text-sm font-medium border transition-all duration-150",
-              !isWorking
+              !isWorking && !knockoutBlocked
                 ? "popup-btn-secondary"
                 : "popup-btn-disabled cursor-not-allowed",
             ].join(" ")}
@@ -636,6 +827,19 @@ export function Popup() {
         {/* Cover letter result — always shown below the button when text exists */}
         {coverLetterDone && !error && coverLetterText && (
           <CoverLetterResult text={coverLetterText} filled={coverLetterFilled} />
+        )}
+
+        {/* Application log — last, because it is history rather than an action */}
+        {settings?.trackApplications !== false && (
+          <TrackerPanel
+            applications={applications}
+            error={trackerError}
+            dueCount={dueCount}
+            onChangeStatus={handleChangeStatus}
+            onDelete={handleDeleteApplication}
+            onRefresh={loadApplications}
+            onOpenUrl={(url) => { void chrome.tabs.create({ url }); }}
+          />
         )}
       </div>
     </div>

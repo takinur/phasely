@@ -16,6 +16,7 @@ import type { StoredResume } from "@/lib/types";
 import { parseProfile, ProfileParseError } from "@/lib/profile";
 import { evaluateKnockoutGate } from "@/lib/knockout";
 import {
+  clearApplications,
   deleteApplication,
   describeDuplicates,
   dueFollowUps,
@@ -85,6 +86,7 @@ export type Message =
   | { type: "SAVE_APPLICATION"; application: NewApplicationInput }
   | { type: "UPDATE_APPLICATION_STATUS"; id: string; status: ApplicationStatus }
   | { type: "DELETE_APPLICATION"; id: string }
+  | { type: "CLEAR_APPLICATIONS" }
   | { type: "WIPE_DATA" };
 
 // ---------------------------------------------------------------------------
@@ -808,6 +810,31 @@ async function handleDeleteApplication(
   }
 }
 
+/**
+ * Clear the whole application log.
+ *
+ * Destructive and irreversible, so the confirm lives in the Options page UI
+ * rather than here — by the time this runs the user has already agreed. The
+ * pending follow-up alarms are torn down with the records so no alarm can fire
+ * pointing at an id that no longer exists.
+ */
+async function handleClearApplications(): Promise<Response<{ cleared: number }>> {
+  try {
+    const existing = await listApplications();
+    for (const record of existing) {
+      await clearFollowUpAlarm(record.id);
+    }
+
+    await clearApplications();
+    await refreshFollowUpBadge();
+    debug("CLEAR_APPLICATIONS: removed", existing.length);
+
+    return { ok: true, cleared: existing.length };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Message router
 // ---------------------------------------------------------------------------
@@ -939,6 +966,10 @@ chrome.runtime.onMessage.addListener(
 
           case "DELETE_APPLICATION":
             sendResponse(await handleDeleteApplication(msg.id));
+            break;
+
+          case "CLEAR_APPLICATIONS":
+            sendResponse(await handleClearApplications());
             break;
 
           case "GET_JOB_CONTEXT": {

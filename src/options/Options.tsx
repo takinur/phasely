@@ -12,11 +12,15 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ExtensionSettings, Profile, StoredResume } from "@/lib/types";
+import type { ApplicationRecord, ExtensionSettings, Profile, StoredResume } from "@/lib/types";
 import { DEFAULT_SETTINGS } from "@/lib/defaults";
 import { ProfileSetup } from "@/options/setup/ProfileSetup";
 import { Alert, SectionHeader } from "@/options/setup/Primitives";
+import TrackerSettings from "@/options/TrackerSettings";
+import type { TrackerSettingsSlice } from "@/options/TrackerSettings";
+import { toCsv } from "@/lib/tracker";
 import { sendMsg } from "@/options/setup/messaging";
+import type { ApplicationsResponse } from "@/options/setup/messaging";
 import logoIcon from "@/assets/logo_phasely.png";
 
 // ---------------------------------------------------------------------------
@@ -223,6 +227,125 @@ function SettingsSection({
 }
 
 // ---------------------------------------------------------------------------
+// Tracker + knockout-guard section
+// ---------------------------------------------------------------------------
+
+/**
+ * Owns persistence for the tracker settings slice and the application log's
+ * bulk actions. TrackerSettings itself is presentational — it reads nothing
+ * from storage, so the SAVE_SETTINGS round trip lives here.
+ */
+function TrackerSettingsSection({
+  settings,
+  onSettingsSaved,
+}: {
+  settings: ExtensionSettings;
+  onSettingsSaved: (settings: ExtensionSettings) => void;
+}) {
+  const [applications, setApplications] = useState<ApplicationRecord[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  /** Pure read, so the mount effect can apply the result after an unmount check. */
+  const fetchApplications = useCallback(async (): Promise<
+    { ok: true; applications: ApplicationRecord[] } | { ok: false; error: string }
+  > => {
+    try {
+      const res = await sendMsg<ApplicationsResponse>({ type: "GET_APPLICATIONS" });
+      if (!res.ok) throw new Error(res.error ?? "Could not read the application log");
+      return { ok: true, applications: res.applications ?? [] };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  }, []);
+
+  const applyApplications = useCallback(
+    (result: Awaited<ReturnType<typeof fetchApplications>>) => {
+      if (result.ok) setApplications(result.applications);
+      else setError(result.error);
+    },
+    [],
+  );
+
+  const loadApplications = useCallback(async () => {
+    applyApplications(await fetchApplications());
+  }, [fetchApplications, applyApplications]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      const result = await fetchApplications();
+      if (cancelled) return;
+      applyApplications(result);
+    })();
+
+    return () => { cancelled = true; };
+  }, [fetchApplications, applyApplications]);
+
+  const handleChange = useCallback(
+    async (patch: Partial<TrackerSettingsSlice>) => {
+      setSaving(true);
+      setError(null);
+      const updated: ExtensionSettings = { ...settings, ...patch };
+      try {
+        const res = await sendMsg<{ ok: boolean; settings: ExtensionSettings; error?: string }>({
+          type: "SAVE_SETTINGS",
+          settings: updated,
+        });
+        if (!res.ok) throw new Error(res.error ?? "Save failed");
+        onSettingsSaved(res.settings);
+      } catch (err) {
+        setError(String(err));
+      } finally {
+        setSaving(false);
+      }
+    },
+    [settings, onSettingsSaved],
+  );
+
+  const handleExportCsv = useCallback(() => {
+    // Built and downloaded entirely in-page — the log never leaves the browser.
+    const blob = new Blob([toCsv(applications)], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `phasely-applications-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }, [applications]);
+
+  const handleClear = useCallback(async () => {
+    if (!window.confirm(`Delete all ${applications.length} tracked applications? This cannot be undone.`)) {
+      return;
+    }
+    try {
+      const res = await sendMsg<{ ok: boolean; error?: string }>({ type: "CLEAR_APPLICATIONS" });
+      if (!res.ok) throw new Error(res.error ?? "Could not clear the log");
+      await loadApplications();
+    } catch (err) {
+      setError(String(err));
+    }
+  }, [applications.length, loadApplications]);
+
+  return (
+    <section className="options-panel rounded-lg border border-gray-200 p-6">
+      {error && <div className="mb-3"><Alert type="error">{error}</Alert></div>}
+      <TrackerSettings
+        settings={settings}
+        onChange={handleChange}
+        applicationCount={applications.length}
+        saving={saving}
+        onExportCsv={applications.length > 0 ? handleExportCsv : undefined}
+        onClearApplications={applications.length > 0 ? handleClear : undefined}
+      />
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // AI Settings section (Gemini API key)
 // ---------------------------------------------------------------------------
 
@@ -248,31 +371,57 @@ function AiSettingsSection({
   const [modelSaveSuccess, setModelSaveSuccess] = useState(false);
   const [modelSaveError, setModelSaveError] = useState<string | null>(null);
 
-  const fetchModels = useCallback(async () => {
-    setModelsLoading(true);
-    setModelsError(null);
+  /** Pure read, so the mount effect can apply the result after an unmount check. */
+  const requestModels = useCallback(async (): Promise<
+    { ok: true; apiKeySet: boolean; models: string[] } | { ok: false; error: string }
+  > => {
     try {
       const res = await sendMsg<{ ok: boolean; apiKeySet: boolean; models: string[]; error?: string }>(
         { type: "GET_GEMINI_MODELS" },
       );
       if (!res.ok) throw new Error(res.error ?? "Failed to load models");
-      setKeyAlreadySaved(res.apiKeySet);
-      const models = res.models ?? [];
-      setAvailableModels(models);
-      if (models.length > 0) {
-        setSelectedModel((prev) => models.includes(prev) ? prev : models[0]);
-      }
+      return { ok: true, apiKeySet: res.apiKeySet, models: res.models ?? [] };
     } catch (err) {
-      setModelsError(String(err));
-    } finally {
-      setModelsLoading(false);
+      return { ok: false, error: String(err) };
     }
   }, []);
 
+  const applyModels = useCallback(
+    (result: Awaited<ReturnType<typeof requestModels>>) => {
+      if (result.ok) {
+        setKeyAlreadySaved(result.apiKeySet);
+        setAvailableModels(result.models);
+        if (result.models.length > 0) {
+          setSelectedModel((prev) => (result.models.includes(prev) ? prev : result.models[0]));
+        }
+        setModelsError(null);
+      } else {
+        setModelsError(result.error);
+      }
+      setModelsLoading(false);
+    },
+    [],
+  );
+
+  /** Event-handler entry point: fetch and apply in one call. */
+  const fetchModels = useCallback(async () => {
+    setModelsLoading(true);
+    setModelsError(null);
+    applyModels(await requestModels());
+  }, [requestModels, applyModels]);
+
   // Load key status + model list on mount.
   useEffect(() => {
-    fetchModels();
-  }, [fetchModels]);
+    let cancelled = false;
+
+    (async () => {
+      const result = await requestModels();
+      if (cancelled) return;
+      applyModels(result);
+    })();
+
+    return () => { cancelled = true; };
+  }, [requestModels, applyModels]);
 
   const handleSaveKey = useCallback(async () => {
     const trimmed = apiKey.trim();
@@ -620,6 +769,11 @@ export function Options() {
         />
 
         <AiSettingsSection
+          settings={settings}
+          onSettingsSaved={setSettings}
+        />
+
+        <TrackerSettingsSection
           settings={settings}
           onSettingsSaved={setSettings}
         />

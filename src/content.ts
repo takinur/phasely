@@ -12,7 +12,7 @@ import { fillField, fillFile } from "./content/filler"
 import { collectGhostEvidence } from "./content/ghostSignals"
 import { submitForm } from "./content/submitter"
 import { assessGhostJob } from "./lib/ghostScore"
-import type { DetectedField, Profile, ExtensionSettings } from "./lib/types"
+import type { DetectedField, ExtensionSettings, KnockoutField, Profile } from "./lib/types"
 
 // Re-export modules so the entry point doubles as a barrel (used by tests).
 export * from "./content/detector"
@@ -75,6 +75,12 @@ chrome.runtime.onMessage.addListener(
               suggestedValue: f.suggestedValue,
               isAiField: f.isAiField,
               fieldType: f.fieldType,
+              // The knockout guard lives in the popup, so the classification
+              // and the question text have to survive the boundary — without
+              // them the popup cannot build its KnockoutField[].
+              isKnockout: f.isKnockout === true,
+              knockoutCategory: f.knockoutCategory,
+              labelText: f.labelText,
             }))
             const jobContext = scrapeJobContext()
             // Ghost-job risk rides along on the detect response so the popup
@@ -206,7 +212,13 @@ chrome.runtime.onMessage.addListener(
             const settings = (msg.settings as Pick<ExtensionSettings, "confirmBeforeSubmit">) ?? {
               confirmBeforeSubmit: true,
             }
-            const result = await submitForm(settings)
+            // Knockout answers the user has explicitly confirmed. Passing them
+            // activates the content-side gate; omitted or incomplete, the gate
+            // refuses rather than submitting a blind work-auth answer.
+            const knockouts = Array.isArray(msg.knockouts)
+              ? (msg.knockouts as KnockoutField[])
+              : undefined
+            const result = await submitForm(settings, knockouts)
             sendResponse({ ok: result.success, message: result.message })
             break
           }
