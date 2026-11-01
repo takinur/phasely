@@ -8,6 +8,7 @@
 
 import { FIELD_MAP } from "@/lib/fieldMap"
 import { scoreField } from "@/lib/fuzzyMatch"
+import { classifyKnockout } from "@/lib/knockout"
 import type { DetectedField, JobContext, Profile } from "@/lib/types"
 
 // ---------------------------------------------------------------------------
@@ -130,6 +131,22 @@ function extractSignals(el: HTMLElement): string[] {
 
   // Deduplicate and filter empties
   return [...new Set(signals.filter((s) => s.length > 0))]
+}
+
+/**
+ * Pick the signal most likely to be the visible label or question text.
+ *
+ * Attribute signals (`name`, `id`, `autocomplete`) are machine-ish — the label
+ * is the one that reads like a sentence. Prefer the longest multi-word signal,
+ * which on a knockout question is the question itself.
+ */
+function bestLabelText(signals: string[]): string | undefined {
+  const prose = signals
+    .map((s) => s.replace(/\s+/g, " ").trim())
+    .filter((s) => s.length >= 4 && s.length <= 160 && s.includes(" "))
+    .sort((a, b) => b.length - a.length)
+
+  return prose[0]
 }
 
 /**
@@ -429,6 +446,13 @@ export function detectFields(profile: Profile): DetectedField[] {
     const fieldType = inferFieldType(el)
     const suggestedValue = profileValueFor(key, profile)
 
+    // Knockout classification runs off the same signals as the field match.
+    // These are the answers that auto-reject an application outright, so they
+    // are flagged here and forced through a manual confirm later regardless of
+    // how confidently they matched.
+    const knockoutCategory = classifyKnockout(signals, key)
+    const labelText = bestLabelText(signals)
+
     const detected: DetectedField = {
       element: el,
       profileKey: key,
@@ -437,6 +461,9 @@ export function detectFields(profile: Profile): DetectedField[] {
       suggestedValue,
       isAiField: AI_KEYS.has(key),
       fieldType,
+      isKnockout: knockoutCategory !== null,
+      ...(knockoutCategory !== null ? { knockoutCategory } : {}),
+      ...(labelText !== undefined ? { labelText } : {}),
     }
 
     results.push(detected)

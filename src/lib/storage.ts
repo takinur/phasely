@@ -7,7 +7,8 @@
  *   - No raw encryption key material is ever persisted to storage.
  */
 
-import type { ExtensionSettings, Profile, ProfilePreset, StoredData, StoredResume } from "@/lib/types";
+import { DEFAULT_SETTINGS } from "@/lib/defaults";
+import type { ApplicationRecord, ApplicationStatus, ExtensionSettings, Profile, ProfilePreset, StoredData, StoredResume } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
 // Chrome storage promise wrappers
@@ -269,7 +270,10 @@ export async function getSettings(
       console.error("[Phasely] getSettings invalid settings shape in storage");
       return null;
     }
-    return parsed;
+    // Settings saved by an earlier version lack keys added since. Layer the
+    // stored object over the defaults so a new toggle reads as its default
+    // rather than as `undefined` (which would silently read false).
+    return { ...DEFAULT_SETTINGS, ...parsed };
   } catch (err) {
     console.error("[Phasely] getSettings failed:", err);
     throw err;
@@ -344,6 +348,54 @@ export async function setPresets(presets: ProfilePreset[]): Promise<void> {
     await storageSet(KEY_PRESETS, encrypted);
   } catch (err) {
     console.error("[Phasely] setPresets failed:", err);
+    throw err;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Application tracker helpers
+//
+// Same contract as the preset helpers above: the log is AES-GCM encrypted
+// before it ever reaches chrome.storage, and nothing is written in plaintext.
+// A read that cannot be decrypted or does not validate returns [] rather than
+// throwing, so a corrupted blob degrades to "no history" instead of bricking
+// the popup.
+// ---------------------------------------------------------------------------
+
+const KEY_APPLICATIONS = "applications";
+
+/**
+ * Retrieve and decrypt the application log. Returns [] when nothing has been
+ * logged yet, or when the stored blob fails to decrypt / validate.
+ */
+export async function getApplications(): Promise<ApplicationRecord[]> {
+  try {
+    const stored = await storageGet<{ iv: string; data: string }>(KEY_APPLICATIONS);
+    if (stored === null) return [];
+    const json = await decryptData(stored.iv, stored.data);
+    const parsed = parseJsonSafe(json);
+    if (!isApplicationRecordArray(parsed)) {
+      console.error("[Phasely] getApplications: invalid shape in storage");
+      return [];
+    }
+    return parsed;
+  } catch (err) {
+    console.error("[Phasely] getApplications failed:", err);
+    return [];
+  }
+}
+
+/**
+ * Encrypt and persist the whole application log.
+ */
+export async function setApplications(
+  applications: ApplicationRecord[],
+): Promise<void> {
+  try {
+    const encrypted = await encryptData(JSON.stringify(applications));
+    await storageSet(KEY_APPLICATIONS, encrypted);
+  } catch (err) {
+    console.error("[Phasely] setApplications failed:", err);
     throw err;
   }
 }
@@ -554,6 +606,42 @@ function isProfilePreset(value: unknown): value is ProfilePreset {
     (o.workAuth === undefined || typeof o.workAuth === "string") &&
     (o.willingToRelocate === undefined || typeof o.willingToRelocate === "boolean")
   );
+}
+
+const APPLICATION_STATUSES: readonly ApplicationStatus[] = [
+  "applied",
+  "screening",
+  "interview",
+  "offer",
+  "rejected",
+  "withdrawn",
+  "ghosted",
+];
+
+function isApplicationStatus(value: unknown): value is ApplicationStatus {
+  return typeof value === "string" && (APPLICATION_STATUSES as readonly string[]).includes(value);
+}
+
+function isApplicationRecord(value: unknown): value is ApplicationRecord {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.id === "string" &&
+    typeof value.company === "string" &&
+    typeof value.title === "string" &&
+    typeof value.location === "string" &&
+    typeof value.url === "string" &&
+    typeof value.appliedAt === "number" &&
+    isApplicationStatus(value.status) &&
+    typeof value.lastStatusAt === "number" &&
+    (value.followUpAt === null || typeof value.followUpAt === "number") &&
+    typeof value.notes === "string" &&
+    (value.ghostScore === null || typeof value.ghostScore === "number") &&
+    typeof value.fieldsFilled === "number"
+  );
+}
+
+function isApplicationRecordArray(value: unknown): value is ApplicationRecord[] {
+  return Array.isArray(value) && value.every(isApplicationRecord);
 }
 
 function isProfilePresetArray(value: unknown): value is ProfilePreset[] {

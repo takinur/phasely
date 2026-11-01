@@ -193,6 +193,99 @@ export function validateProfile(data: unknown, rawMarkdown = ""): Profile {
  * stored in rawMarkdown so saving doesn't silently erase the user's prose.
  */
 export function profileToMarkdown(profile: Profile): string {
+  return assembleMarkdown(profile, extractMarkdownBody(profile.rawMarkdown));
+}
+
+/**
+ * Build a complete, valid profile.md for a Profile — front-matter plus a body.
+ *
+ * Differs from profileToMarkdown in one way that matters: when the profile has
+ * no prose body (which is the case for every profile created through the guided
+ * form), a body is *synthesized* from the structured fields. rawMarkdown is the
+ * context the AI generation path consumes, so it must never be empty just
+ * because the user never opened a markdown editor.
+ */
+export function buildProfileMarkdown(profile: Profile): string {
+  const body = extractMarkdownBody(profile.rawMarkdown) || synthesizeMarkdownBody(profile);
+  return assembleMarkdown(profile, body);
+}
+
+/**
+ * Front-matter block + optional body, with a blank line between them.
+ * Single source of truth for markdown layout.
+ */
+function assembleMarkdown(profile: Profile, body: string): string {
+  const yamlSection = `---\n${stringifyYaml(buildFrontMatterData(profile))}---\n`;
+  const trimmedBody = body.trim();
+  return trimmedBody ? `${yamlSection}\n${trimmedBody}\n` : yamlSection;
+}
+
+/**
+ * Everything after the front-matter fence. Returns "" when the markdown is
+ * front-matter only, or when there is no front-matter fence at all.
+ */
+function extractMarkdownBody(rawMarkdown: string): string {
+  const bodyMatch = rawMarkdown.match(
+    /^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)([\s\S]*)$/,
+  );
+  return (bodyMatch ? bodyMatch[1] : "").trim();
+}
+
+/**
+ * Compose a readable prose body out of the structured fields, so a
+ * form-authored profile still gives the AI something to work with.
+ * Sections with no data are omitted entirely.
+ */
+function synthesizeMarkdownBody(profile: Profile): string {
+  const sections: string[] = [];
+
+  const summarySentences: string[] = [];
+  if (profile.currentTitle && profile.currentCompany) {
+    summarySentences.push(`${profile.currentTitle} at ${profile.currentCompany}.`);
+  } else if (profile.currentTitle) {
+    summarySentences.push(`${profile.currentTitle}.`);
+  } else if (profile.currentCompany) {
+    summarySentences.push(`Currently at ${profile.currentCompany}.`);
+  }
+  if (profile.yearsExperience > 0) {
+    summarySentences.push(
+      `${profile.yearsExperience} year${profile.yearsExperience === 1 ? "" : "s"} of professional experience.`,
+    );
+  }
+  if (profile.location) summarySentences.push(`Based in ${profile.location}.`);
+  if (profile.workAuth) summarySentences.push(`Work authorisation: ${profile.workAuth}.`);
+  if (summarySentences.length > 0) {
+    sections.push(`## Summary\n\n${summarySentences.join(" ")}`);
+  }
+
+  if (profile.skills.length > 0) {
+    sections.push(`## Skills\n\n${profile.skills.join(", ")}`);
+  }
+
+  if (profile.education.length > 0) {
+    const lines = profile.education
+      .map((entry) => {
+        const parts = [entry.degree, entry.institution].filter(Boolean).join(" — ");
+        return entry.year > 0 ? `- ${parts} (${entry.year})` : `- ${parts}`;
+      })
+      .filter((line) => line.trim() !== "-");
+    if (lines.length > 0) sections.push(`## Education\n\n${lines.join("\n")}`);
+  }
+
+  const preferences: string[] = [];
+  if (profile.remotePreference) preferences.push(`- Remote preference: ${profile.remotePreference}`);
+  if (profile.noticePeriod) preferences.push(`- Notice period: ${profile.noticePeriod}`);
+  if (profile.salaryExpectation) preferences.push(`- Salary expectation: ${profile.salaryExpectation}`);
+  preferences.push(`- Willing to relocate: ${profile.willingToRelocate ? "yes" : "no"}`);
+  if (preferences.length > 1) {
+    sections.push(`## Preferences\n\n${preferences.join("\n")}`);
+  }
+
+  return sections.join("\n\n");
+}
+
+/** Front-matter key/value map. Shared by every serializer above. */
+function buildFrontMatterData(profile: Profile): Record<string, unknown> {
   // Build front-matter data — omit rawMarkdown (it's internal metadata)
   const frontMatter: Record<string, unknown> = {
     firstName: profile.firstName,
@@ -218,17 +311,7 @@ export function profileToMarkdown(profile: Profile): string {
   if (profile.github !== undefined) frontMatter.github = profile.github;
   if (profile.portfolio !== undefined) frontMatter.portfolio = profile.portfolio;
 
-  const yamlSection = `---\n${stringifyYaml(frontMatter)}---\n`;
-
-  // Re-attach the markdown body that follows the front-matter close (---).
-  // rawMarkdown holds the full sanitised original markdown, so we strip the
-  // front-matter block and keep everything after it.
-  const bodyMatch = profile.rawMarkdown.match(
-    /^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)([\s\S]*)$/,
-  );
-  const body = (bodyMatch ? bodyMatch[1] : "").trimStart();
-
-  return body ? `${yamlSection}\n${body}` : yamlSection;
+  return frontMatter;
 }
 
 // ---------------------------------------------------------------------------
@@ -343,4 +426,416 @@ function getEducationArray(
     });
   }
   return result;
+}
+
+// ---------------------------------------------------------------------------
+// Guided form model — the primary (markdown-free) authoring path
+//
+// Everything a user types in the setup form lives here as plain strings, which
+// is what <input> elements actually produce. Coercion to the typed Profile
+// happens in exactly one place (formValuesToProfile), and markdown is
+// synthesized rather than hand-authored.
+// ---------------------------------------------------------------------------
+
+export interface EducationFormRow {
+  degree: string;
+  institution: string;
+  /** Kept as a string so a half-typed year isn't coerced to 0 mid-keystroke. */
+  year: string;
+}
+
+export interface ProfileFormValues {
+  // Step 1 — Contact
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string;
+  location: string;
+  linkedin: string;
+
+  // Step 2 — Eligibility & preferences
+  workAuth: string;
+  willingToRelocate: boolean;
+  remotePreference: string;
+  noticePeriod: string;
+  salaryExpectation: string;
+
+  // Step 3 — Experience
+  currentTitle: string;
+  currentCompany: string;
+  yearsExperience: string;
+  /** Comma-separated in the form; split into Profile.skills on save. */
+  skills: string;
+  education: EducationFormRow[];
+
+  // Extras that have no step of their own
+  github: string;
+  portfolio: string;
+  referencesAvailable: boolean;
+  /**
+   * Free-text prose that becomes the markdown body — and therefore the context
+   * the AI generation path reads. Optional; a body is synthesized when empty.
+   */
+  notes: string;
+}
+
+export type ProfileFormField = keyof ProfileFormValues;
+
+export const EMPTY_PROFILE_FORM: ProfileFormValues = {
+  firstName: "",
+  lastName: "",
+  email: "",
+  phone: "",
+  location: "",
+  linkedin: "",
+  workAuth: "",
+  willingToRelocate: false,
+  remotePreference: "",
+  noticePeriod: "",
+  salaryExpectation: "",
+  currentTitle: "",
+  currentCompany: "",
+  yearsExperience: "",
+  skills: "",
+  education: [],
+  github: "",
+  portfolio: "",
+  referencesAvailable: false,
+  notes: "",
+};
+
+export const PROFILE_FIELD_LABELS: Record<ProfileFormField, string> = {
+  firstName: "First name",
+  lastName: "Last name",
+  email: "Email",
+  phone: "Phone",
+  location: "Location",
+  linkedin: "LinkedIn",
+  workAuth: "Work authorisation",
+  willingToRelocate: "Willing to relocate",
+  remotePreference: "Remote preference",
+  noticePeriod: "Notice period",
+  salaryExpectation: "Salary expectation",
+  currentTitle: "Current title",
+  currentCompany: "Current company",
+  yearsExperience: "Years of experience",
+  skills: "Skills",
+  education: "Education",
+  github: "GitHub",
+  portfolio: "Portfolio",
+  referencesAvailable: "References available",
+  notes: "Summary / notes",
+};
+
+/**
+ * The only fields that gate a first fill. Everything else is a soft nudge —
+ * never a blocking error.
+ */
+export const FILL_REQUIRED_FIELDS = [
+  "firstName",
+  "lastName",
+  "email",
+  "phone",
+  "location",
+  "workAuth",
+] as const satisfies readonly ProfileFormField[];
+
+/**
+ * Fields that measurably improve fill coverage but must never block the user.
+ * Drives the "N fields left to improve your match rate" nudge.
+ */
+export const RECOMMENDED_FIELDS = [
+  "linkedin",
+  "currentTitle",
+  "currentCompany",
+  "yearsExperience",
+  "skills",
+  "education",
+  "remotePreference",
+  "noticePeriod",
+  "salaryExpectation",
+] as const satisfies readonly ProfileFormField[];
+
+export type ProfileFormErrors = Partial<Record<ProfileFormField, string>>;
+
+export interface ProfileFormValidation {
+  /** Per-field message, shown inline next to the input it belongs to. */
+  errors: ProfileFormErrors;
+  /** Per-row message for the education repeater, index-aligned with `education`. */
+  educationErrors: (string | null)[];
+  /** Gating fields that are still missing or invalid. */
+  blocking: ProfileFormField[];
+  /** Optional fields worth filling in, for the soft nudge. */
+  nudges: ProfileFormField[];
+  /** True when all FILL_REQUIRED_FIELDS are present and valid. */
+  readyToFill: boolean;
+  /** True when the three fields parseProfile insists on are valid. */
+  savable: boolean;
+}
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+const PHONE_ALLOWED_RE = /^[+()\-.\s\d]+$/;
+const URL_RE = /^(https?:\/\/)?[\w-]+(\.[\w-]+)+(\/\S*)?$/;
+
+/**
+ * Validate form values field by field. Returns messages written for a job
+ * seeker, not a developer — they render next to the offending input.
+ *
+ * Never throws: the form stays usable while it is incomplete.
+ */
+export function validateProfileForm(values: ProfileFormValues): ProfileFormValidation {
+  const errors: ProfileFormErrors = {};
+
+  if (!values.firstName.trim()) errors.firstName = "Enter your first name";
+  if (!values.lastName.trim()) errors.lastName = "Enter your last name";
+
+  const email = values.email.trim();
+  if (!email) {
+    errors.email = "Enter your email address";
+  } else if (!EMAIL_RE.test(email)) {
+    errors.email = "That doesn't look like an email address";
+  }
+
+  const phone = values.phone.trim();
+  if (!phone) {
+    errors.phone = "Enter a phone number — most application forms require one";
+  } else if (!PHONE_ALLOWED_RE.test(phone) || digitCount(phone) < 7 || digitCount(phone) > 15) {
+    errors.phone = "That doesn't look like a phone number";
+  }
+
+  if (!values.location.trim()) {
+    errors.location = "Enter a city and country, e.g. Berlin, Germany";
+  }
+
+  if (!values.workAuth.trim()) {
+    errors.workAuth = "Enter your work authorisation — forms ask about it constantly";
+  }
+
+  for (const key of ["linkedin", "github", "portfolio"] as const) {
+    const value = values[key].trim();
+    if (value && !URL_RE.test(value)) {
+      errors[key] = "That doesn't look like a link";
+    }
+  }
+
+  const years = values.yearsExperience.trim();
+  if (years) {
+    const parsed = Number(years);
+    if (!Number.isFinite(parsed) || parsed < 0 || parsed > 60) {
+      errors.yearsExperience = "Enter a number of years between 0 and 60";
+    }
+  }
+
+  const educationErrors = values.education.map((row) => {
+    const hasText = Boolean(row.degree.trim() || row.institution.trim());
+    const year = row.year.trim();
+    if (year) {
+      const parsed = Number(year);
+      const maxYear = new Date().getFullYear() + 10;
+      if (!Number.isInteger(parsed) || parsed < 1900 || parsed > maxYear) {
+        return `Enter a year between 1900 and ${maxYear}`;
+      }
+    }
+    if (!hasText && year) return "Add the degree or institution for this entry";
+    return null;
+  });
+  if (educationErrors.some((e) => e !== null)) {
+    errors.education = "Check the highlighted education entries";
+  }
+
+  const blocking = FILL_REQUIRED_FIELDS.filter((field) => errors[field] !== undefined);
+  const nudges = RECOMMENDED_FIELDS.filter((field) => isFormFieldEmpty(values, field));
+
+  return {
+    errors,
+    educationErrors,
+    blocking: [...blocking],
+    nudges: [...nudges],
+    readyToFill: blocking.length === 0,
+    savable:
+      errors.firstName === undefined &&
+      errors.lastName === undefined &&
+      errors.email === undefined,
+  };
+}
+
+function digitCount(value: string): number {
+  return value.replace(/\D/g, "").length;
+}
+
+function isFormFieldEmpty(values: ProfileFormValues, field: ProfileFormField): boolean {
+  const value = values[field];
+  if (typeof value === "string") return value.trim().length === 0;
+  if (Array.isArray(value)) {
+    return value.every((row) => !row.degree.trim() && !row.institution.trim());
+  }
+  return false;
+}
+
+/**
+ * Readiness of an already-stored Profile, for the popup's first-fill gate.
+ * Returns human labels so the caller can render them directly.
+ */
+export function fillReadiness(profile: Profile | null): { ready: boolean; missing: string[] } {
+  if (!profile) {
+    return { ready: false, missing: FILL_REQUIRED_FIELDS.map((f) => PROFILE_FIELD_LABELS[f]) };
+  }
+  const missing = FILL_REQUIRED_FIELDS.filter((field) => {
+    const value = profile[field];
+    return typeof value !== "string" || value.trim().length === 0;
+  }).map((field) => PROFILE_FIELD_LABELS[field]);
+  return { ready: missing.length === 0, missing };
+}
+
+// ---------------------------------------------------------------------------
+// Form <-> Profile <-> markdown conversion
+// ---------------------------------------------------------------------------
+
+/**
+ * Hydrate the guided form from a stored Profile (or produce an empty form).
+ * The markdown body is surfaced verbatim in `notes` so prose written by a
+ * power user in the markdown view survives a trip through the form.
+ */
+export function profileToFormValues(profile: Profile | null): ProfileFormValues {
+  if (!profile) return { ...EMPTY_PROFILE_FORM, education: [] };
+  return {
+    firstName: profile.firstName,
+    lastName: profile.lastName,
+    email: profile.email,
+    phone: profile.phone,
+    location: profile.location,
+    linkedin: profile.linkedin ?? "",
+    workAuth: profile.workAuth,
+    willingToRelocate: profile.willingToRelocate,
+    remotePreference: profile.remotePreference,
+    noticePeriod: profile.noticePeriod,
+    salaryExpectation: profile.salaryExpectation,
+    currentTitle: profile.currentTitle,
+    currentCompany: profile.currentCompany,
+    yearsExperience: profile.yearsExperience > 0 ? String(profile.yearsExperience) : "",
+    skills: profile.skills.join(", "),
+    education: profile.education.map((entry) => ({
+      degree: entry.degree,
+      institution: entry.institution,
+      year: entry.year > 0 ? String(entry.year) : "",
+    })),
+    github: profile.github ?? "",
+    portfolio: profile.portfolio ?? "",
+    referencesAvailable: profile.referencesAvailable,
+    notes: extractMarkdownBody(profile.rawMarkdown),
+  };
+}
+
+/**
+ * Turn form values into the front-matter map the serializers expect.
+ * Internal: callers want buildProfileMarkdownFromForm or formValuesToProfile.
+ */
+function formValuesToFrontMatter(values: ProfileFormValues): Record<string, unknown> {
+  const data: Record<string, unknown> = {
+    firstName: values.firstName.trim(),
+    lastName: values.lastName.trim(),
+    email: values.email.trim(),
+    phone: values.phone.trim(),
+    location: values.location.trim(),
+    workAuth: values.workAuth.trim(),
+    noticePeriod: values.noticePeriod.trim(),
+    salaryExpectation: values.salaryExpectation.trim(),
+    willingToRelocate: values.willingToRelocate,
+    remotePreference: values.remotePreference.trim(),
+    currentTitle: values.currentTitle.trim(),
+    currentCompany: values.currentCompany.trim(),
+    yearsExperience: toYears(values.yearsExperience),
+    skills: splitSkills(values.skills),
+    education: values.education
+      .filter((row) => row.degree.trim() || row.institution.trim())
+      .map((row) => ({
+        degree: row.degree.trim(),
+        institution: row.institution.trim(),
+        year: toYear(row.year),
+      })),
+    referencesAvailable: values.referencesAvailable,
+  };
+
+  for (const key of ["linkedin", "github", "portfolio"] as const) {
+    const value = values[key].trim();
+    if (value) data[key] = value;
+  }
+
+  return data;
+}
+
+/**
+ * Synthesize a complete profile.md from form values.
+ *
+ * This is what the Options page sends to SAVE_PROFILE: the service worker
+ * still parses markdown, so the guided form and the markdown path converge on
+ * one storage path — and rawMarkdown is always populated for the AI context.
+ *
+ * Deliberately NOT sanitized here: sanitization happens inside validateProfile
+ * when rawMarkdown is attached, so front-matter YAML can never be corrupted by
+ * a placeholder line dropped mid-document. Never throws.
+ */
+export function buildProfileMarkdownFromForm(values: ProfileFormValues): string {
+  const frontMatter = formValuesToFrontMatter(values);
+  const yamlSection = `---\n${stringifyYaml(frontMatter)}---\n`;
+  const notes = values.notes.trim();
+  const body = notes || synthesizeMarkdownBody(draftProfileFromFrontMatter(frontMatter));
+  return body ? `${yamlSection}\n${body}\n` : yamlSection;
+}
+
+/**
+ * Build a validated Profile straight from form values, with rawMarkdown
+ * populated by the synthesizer.
+ *
+ * Throws ProfileParseError when firstName / lastName / email are missing — the
+ * same contract as parseProfile, because it routes through it.
+ */
+export function formValuesToProfile(values: ProfileFormValues): Profile {
+  return parseProfile(buildProfileMarkdownFromForm(values));
+}
+
+/**
+ * A Profile-shaped value used only to feed synthesizeMarkdownBody before the
+ * real validation pass. Not exported: it skips required-field checks.
+ */
+function draftProfileFromFrontMatter(data: Record<string, unknown>): Profile {
+  return {
+    firstName: getString(data, "firstName"),
+    lastName: getString(data, "lastName"),
+    email: getString(data, "email"),
+    phone: getString(data, "phone"),
+    location: getString(data, "location"),
+    workAuth: getString(data, "workAuth"),
+    noticePeriod: getString(data, "noticePeriod"),
+    salaryExpectation: getString(data, "salaryExpectation"),
+    remotePreference: getString(data, "remotePreference"),
+    currentTitle: getString(data, "currentTitle"),
+    currentCompany: getString(data, "currentCompany"),
+    linkedin: getOptionalString(data, "linkedin"),
+    github: getOptionalString(data, "github"),
+    portfolio: getOptionalString(data, "portfolio"),
+    willingToRelocate: getBoolean(data, "willingToRelocate"),
+    referencesAvailable: getBoolean(data, "referencesAvailable"),
+    yearsExperience: getNumber(data, "yearsExperience"),
+    skills: getStringArray(data, "skills"),
+    education: getEducationArray(data, "education"),
+    rawMarkdown: "",
+  };
+}
+
+function splitSkills(raw: string): string[] {
+  return raw
+    .split(/[,\n]/)
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+}
+
+function toYears(raw: string): number {
+  const parsed = Number(raw.trim());
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+}
+
+function toYear(raw: string): number {
+  const parsed = Number(raw.trim());
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : 0;
 }

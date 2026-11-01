@@ -9,12 +9,15 @@
 
 import { detectFields, scrapeJobContext } from "./content/detector"
 import { fillField, fillFile } from "./content/filler"
+import { collectGhostEvidence } from "./content/ghostSignals"
 import { submitForm } from "./content/submitter"
-import type { DetectedField, Profile, ExtensionSettings } from "./lib/types"
+import { assessGhostJob } from "./lib/ghostScore"
+import type { DetectedField, ExtensionSettings, KnockoutField, Profile } from "./lib/types"
 
 // Re-export modules so the entry point doubles as a barrel (used by tests).
 export * from "./content/detector"
 export * from "./content/filler"
+export * from "./content/ghostSignals"
 export * from "./content/submitter"
 
 // ---------------------------------------------------------------------------
@@ -38,7 +41,7 @@ chrome.runtime.onMessage.addListener(
     }
 
     const msg = message as { type: string } & Record<string, unknown>
-    const contentMessageTypes = new Set(["DETECT_FIELDS", "FILL_ALL", "FILL_ONLY", "FILL_AI_TEXT", "GET_JOB_CONTEXT", "SUBMIT"])
+    const contentMessageTypes = new Set(["DETECT_FIELDS", "FILL_ALL", "FILL_ONLY", "FILL_AI_TEXT", "GET_JOB_CONTEXT", "ASSESS_GHOST_JOB", "SUBMIT"])
     if (!contentMessageTypes.has(msg.type)) {
       return false
     }
@@ -49,6 +52,14 @@ chrome.runtime.onMessage.addListener(
           case "GET_JOB_CONTEXT": {
             const jobContext = scrapeJobContext()
             sendResponse({ ok: true, jobContext })
+            break
+          }
+
+          case "ASSESS_GHOST_JOB": {
+            // Scored entirely in-page. Nothing is sent anywhere.
+            const jobContext = scrapeJobContext()
+            const ghost = assessGhostJob(collectGhostEvidence(jobContext))
+            sendResponse({ ok: true, ghost, jobContext })
             break
           }
 
@@ -64,9 +75,18 @@ chrome.runtime.onMessage.addListener(
               suggestedValue: f.suggestedValue,
               isAiField: f.isAiField,
               fieldType: f.fieldType,
+              // The knockout guard lives in the popup, so the classification
+              // and the question text have to survive the boundary — without
+              // them the popup cannot build its KnockoutField[].
+              isKnockout: f.isKnockout === true,
+              knockoutCategory: f.knockoutCategory,
+              labelText: f.labelText,
             }))
             const jobContext = scrapeJobContext()
-            sendResponse({ ok: true, fields, jobContext })
+            // Ghost-job risk rides along on the detect response so the popup
+            // needs one round trip, not two.
+            const ghost = assessGhostJob(collectGhostEvidence(jobContext))
+            sendResponse({ ok: true, fields, jobContext, ghost })
             break
           }
 
@@ -192,7 +212,13 @@ chrome.runtime.onMessage.addListener(
             const settings = (msg.settings as Pick<ExtensionSettings, "confirmBeforeSubmit">) ?? {
               confirmBeforeSubmit: true,
             }
-            const result = await submitForm(settings)
+            // Knockout answers the user has explicitly confirmed. Passing them
+            // activates the content-side gate; omitted or incomplete, the gate
+            // refuses rather than submitting a blind work-auth answer.
+            const knockouts = Array.isArray(msg.knockouts)
+              ? (msg.knockouts as KnockoutField[])
+              : undefined
+            const result = await submitForm(settings, knockouts)
             sendResponse({ ok: result.success, message: result.message })
             break
           }

@@ -1,4 +1,7 @@
 // src/lib/fieldMap.ts — canonical mapping
+
+import type { KnockoutCategory } from "@/lib/types"
+
 const RAW_FIELD_MAP: Record<string, string[]> = {
   // Personal
   "firstName":         ["first_name", "fname", "given-name", "given_name", "givenname", "firstname", "first-name", "first", "legal_first_name", "candidate_first_name", "applicant_first_name", "firstName"],
@@ -60,3 +63,126 @@ function buildCanonicalFieldMap(
 export const FIELD_MAP: Record<string, string[]> = buildCanonicalFieldMap(
   RAW_FIELD_MAP,
 )
+
+// ---------------------------------------------------------------------------
+// Knockout question vocabulary
+//
+// Knockout questions are the answers that can auto-reject an application
+// outright (work authorization, sponsorship, relocation, …). They are kept in
+// a SEPARATE map from FIELD_MAP on purpose:
+//
+//   - FIELD_MAP keys are canonical *Profile* keys — the detector resolves a
+//     field to one of them and reads a value off the Profile object. Adding
+//     question categories there would invent keys with no Profile backing.
+//   - KNOCKOUT_FIELD_MAP keys are KnockoutCategory values — they classify the
+//     *question being asked*, independent of which profile value answers it.
+//
+// Both maps go through buildCanonicalFieldMap, so aliases are lowercased,
+// trimmed and deduped identically. Aliases here are written as question
+// fragments (phrases), not bare column names, because knockout questions show
+// up as label text far more often than as tidy `name` attributes.
+//
+// Expected markdown front-matter keys that answer these:
+//   work_auth / workAuth          → workAuthorization, sponsorship
+//   willing_to_relocate           → relocation
+//   salary_expectation            → salary
+//   location                      → location
+// ---------------------------------------------------------------------------
+
+const RAW_KNOCKOUT_MAP: Record<KnockoutCategory, string[]> = {
+  "workAuthorization": [
+    "work authorization", "work authorisation", "work_authorization", "work_auth",
+    "authorized to work", "authorised to work", "legally authorized to work",
+    "legally authorised to work", "legally authorized", "legally eligible to work",
+    "eligible to work", "right to work", "right_to_work", "employment authorization",
+    "employment eligibility", "work eligibility", "work permit", "working rights",
+    "citizenship status", "are you a citizen", "citizen or permanent resident",
+    "permanent resident", "visa status", "immigration status", "e verify",
+    "proof of eligibility", "without restriction",
+  ],
+
+  "sponsorship": [
+    "sponsorship", "requires sponsorship", "require sponsorship", "need sponsorship",
+    "visa sponsorship", "require visa sponsorship", "need visa sponsorship",
+    "immigration sponsorship", "sponsorship now or in the future",
+    "will you require sponsorship", "will you now or in the future require",
+    "h1b", "h 1b", "h1b transfer", "tn visa", "opt cpt", "sponsored visa",
+  ],
+
+  "location": [
+    "where are you located", "where are you based", "current location",
+    "are you located", "located in", "country of residence", "country you reside",
+    "legally reside", "currently reside", "residency", "work location",
+    "preferred work location", "office location", "able to commute",
+    "willing to commute", "commuting distance", "commute", "based in",
+    "time zone", "timezone", "work onsite", "work from the office",
+    "in office days", "hybrid schedule",
+  ],
+
+  "relocation": [
+    "relocate", "relocation", "willing to relocate", "open to relocation",
+    "able to relocate", "would you relocate", "relocation assistance",
+    "relocation preference", "willing to move", "prepared to relocate",
+  ],
+
+  "travel": [
+    "travel", "willing to travel", "able to travel", "travel requirement",
+    "travel requirements", "travel percentage", "percent travel", "overnight travel",
+    "travel up to", "domestic travel", "international travel", "valid passport",
+  ],
+
+  "shiftAvailability": [
+    "shift", "shifts", "shift availability", "available shifts", "shift preference",
+    "night shift", "swing shift", "graveyard shift", "rotating shift",
+    "weekend availability", "work weekends", "willing to work weekends",
+    "overtime", "work overtime", "on call", "availability to work",
+    "schedule availability", "hours per week", "full time or part time",
+  ],
+
+  "license": [
+    "license", "licence", "licensure", "drivers license", "driver license",
+    "driver s license", "valid driver", "cdl", "commercial driver",
+    "professional license", "license number", "certification required",
+    "security clearance", "clearance level", "active clearance", "bar admission",
+  ],
+
+  "backgroundCheck": [
+    "background check", "background screening", "background investigation",
+    "criminal record", "criminal history", "convicted", "conviction", "felony",
+    "misdemeanor", "drug test", "drug screen", "drug screening",
+    "pre employment screening", "credit check", "consent to background check",
+    "fingerprint",
+  ],
+
+  "salary": [
+    "salary expectation", "salary expectations", "desired salary", "expected salary",
+    "salary requirement", "salary requirements", "minimum salary", "salary range",
+    "compensation expectation", "compensation expectations", "expected compensation",
+    "desired compensation", "base salary expectation", "pay expectation",
+    "expected ctc", "current ctc", "hourly rate expectation", "desired rate",
+  ],
+}
+
+/**
+ * Canonical knockout vocabulary: KnockoutCategory → deduped lowercase aliases.
+ * Consumed by `classifyKnockout` in src/lib/knockout.ts.
+ */
+export const KNOCKOUT_FIELD_MAP = buildCanonicalFieldMap(
+  RAW_KNOCKOUT_MAP,
+) as Record<KnockoutCategory, string[]>
+
+/**
+ * Profile keys whose answer is *inherently* a knockout, whatever the question
+ * text looks like. Used as the floor in `classifyKnockout` so a field that
+ * matched one of these keys is still gated even when its label text was too
+ * unusual to classify.
+ *
+ * Deliberately narrow: `location` and `remotePreference` are NOT here because
+ * every plain city/state/country input would then demand a manual confirm.
+ * Those categories are still reachable through the question-phrase aliases.
+ */
+export const KNOCKOUT_PROFILE_KEYS: Record<string, KnockoutCategory> = {
+  workAuth: "workAuthorization",
+  willingToRelocate: "relocation",
+  salaryExpectation: "salary",
+}

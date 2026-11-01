@@ -3,7 +3,8 @@
  * and fires it, with optional confirmation and post-submit success detection.
  */
 
-import type { ExtensionSettings } from "@/lib/types"
+import { evaluateKnockoutGate } from "@/lib/knockout"
+import type { ExtensionSettings, KnockoutCategory, KnockoutField } from "@/lib/types"
 
 // ---------------------------------------------------------------------------
 // Debug utility
@@ -152,17 +153,55 @@ async function waitForSuccess(originalUrl: string, timeoutMs = 5000): Promise<bo
 // Public API
 // ---------------------------------------------------------------------------
 
+/** Settings slice submitForm needs. The knockout toggle is optional so older
+ * callers that only pass `confirmBeforeSubmit` still type-check; when it is
+ * absent the gate fails safe and treats it as enabled. */
+export type SubmitSettings = Pick<ExtensionSettings, "confirmBeforeSubmit"> &
+  Partial<Pick<ExtensionSettings, "blockSubmitOnUnconfirmedKnockouts">>
+
+export interface SubmitResult {
+  success: boolean
+  message: string
+  /** True when the knockout guard refused to submit. */
+  blockedByKnockouts?: boolean
+  /** Categories that still need a human confirm (only when blocked). */
+  unconfirmedCategories?: KnockoutCategory[]
+}
+
 /**
  * Find and click the submit button, respecting the confirmBeforeSubmit
  * setting. After clicking, polls for a success state for up to 5 seconds.
  *
+ * Hard knockout gate: when `blockSubmitOnUnconfirmedKnockouts` is enabled
+ * (the default, including when the flag is absent) and any knockout answer
+ * passed in `knockouts` is unconfirmed, nothing is clicked at all — the result
+ * names the categories that need review. A careless autopilot answer on work
+ * authorization, sponsorship or relocation gets the application auto-rejected
+ * in seconds, so this check runs before the confirm dialog and before any DOM
+ * interaction.
+ *
  * Returns a result object rather than throwing so callers can surface
  * the outcome in the popup UI.
+ *
+ * @param knockouts Detected knockout answers with their confirmation state.
+ *                  Omit (or pass []) when the caller has none to report.
  */
 export async function submitForm(
-  settings: Pick<ExtensionSettings, "confirmBeforeSubmit">
-): Promise<{ success: boolean; message: string }> {
+  settings: SubmitSettings,
+  knockouts?: KnockoutField[]
+): Promise<SubmitResult> {
   try {
+    const gate = evaluateKnockoutGate(settings, knockouts)
+    if (gate.blocked) {
+      debug("submitForm: blocked by unconfirmed knockouts:", gate.categories.join(", "))
+      return {
+        success: false,
+        message: gate.message,
+        blockedByKnockouts: true,
+        unconfirmedCategories: gate.categories,
+      }
+    }
+
     const button = findSubmitButton()
 
     if (!button) {
